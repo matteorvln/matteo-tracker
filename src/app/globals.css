@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
+
+:root {
+  --gold: #F0C040;
+  --dark1: #080C10;
+  --dark2: #0E1318;
+  --dark3: #161D24;
+  --dark4: #1E262F;
+  --green: #22D37A;
+  --red: #FF4455;
+}
+
+body {
+  font-family: 'Syne', sans-serif;
+  background: var(--dark1);
+  color: #F5F2EC;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--dark2); }
+::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 4px; }
+
+/* Number input arrows hidden */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
