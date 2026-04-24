@@ -416,7 +416,7 @@ export default function App() {
           {streak > 0 && <div style={{ padding: "3px 8px", borderRadius: 10, background: vio + "12", border: `1px solid ${vio}25`, fontSize: 11, fontWeight: 600, color: vio }}>🔥 {streak}j</div>}
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1.5 }}>Patrimoine</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{fmt(totalEur)}</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{totalEur < 0 ? "-" : ""}{fmt(totalEur)}</div>
           </div>
         </div>
       </div>
@@ -426,7 +426,7 @@ export default function App() {
         <G style={{ padding: "12px 14px" }} glow={vio}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
             <span style={{ fontSize: 11, color: t2 }}>🎯 Objectif</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: vioBright }}>{fmt(totalEur)} / {fmt(goal)}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: vioBright }}>{totalEur < 0 ? "-" : ""}{fmt(totalEur)} / {fmt(goal)}</span>
           </div>
           <div style={{ height: 10, borderRadius: 5, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
             <div style={{ height: "100%", borderRadius: 5, width: `${goalPct}%`, background: `linear-gradient(90deg, ${purple}, ${vioBright}, #e879f9)`, boxShadow: `0 0 16px ${vio}70`, transition: "width 0.8s cubic-bezier(0.4,0,0.2,1)" }} />
