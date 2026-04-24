@@ -2,13 +2,14 @@ import './globals.css'
 
 export const metadata = {
   title: 'Matteo Tracker',
-  description: 'Expense tracker personnel',
+  description: 'Life & Finance Tracker',
+  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
 }
 
 export default function RootLayout({ children }) {
   return (
     <html lang="fr">
-      <body className="min-h-screen">{children}</body>
+      <body>{children}</body>
     </html>
   )
 }

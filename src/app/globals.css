@@ -1,30 +1,9 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
-
-:root {
-  --gold: #F0C040;
-  --dark1: #080C10;
-  --dark2: #0E1318;
-  --dark3: #161D24;
-  --dark4: #1E262F;
-  --green: #22D37A;
-  --red: #FF4455;
-}
-
-body {
-  font-family: 'Syne', sans-serif;
-  background: var(--dark1);
-  color: #F5F2EC;
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: var(--dark2); }
-::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 4px; }
-
-/* Number input arrows hidden */
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+body { font-family: 'Outfit', sans-serif; background: #050508; color: #e2e8f0; min-height: 100vh; overflow-x: hidden; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0a0a10; }
+::-webkit-scrollbar-thumb { background: #a78bfa; border-radius: 4px; }
