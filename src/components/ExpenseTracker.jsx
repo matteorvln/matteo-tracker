@@ -166,8 +166,13 @@ export default function App() {
 
   const balances = useMemo(() => {
     const b = {}; PLATFORMS.forEach(p => b[p.id] = initialBalances[p.id] || 0);
+    allTx.forEach(tx => {
+      if (tx.type === "income") b[tx.platform] = (b[tx.platform] || 0) + tx.amount;
+      else if (tx.type === "expense") b[tx.platform] = (b[tx.platform] || 0) - tx.amount;
+      else if (tx.type === "transfer") { b[tx.platform] = (b[tx.platform] || 0) - tx.amount; b[tx.to] = (b[tx.to] || 0) + tx.amount - (tx.fees || 0); }
+    });
     return b;
-  }, [initialBalances]);
+  }, [initialBalances, allTx]);
 
   const totalEur = useMemo(() => PLATFORMS.reduce((s, p) => s + (balances[p.id] || 0), 0), [balances]);
   const goalPct = Math.min(Math.max((totalEur / (goal || GOAL)) * 100, 0), 100);
@@ -411,7 +416,7 @@ export default function App() {
           {streak > 0 && <div style={{ padding: "3px 8px", borderRadius: 10, background: vio + "12", border: `1px solid ${vio}25`, fontSize: 11, fontWeight: 600, color: vio }}>🔥 {streak}j</div>}
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1.5 }}>Patrimoine</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{fmt(totalEur)}</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtS(totalEur)}</div>
           </div>
         </div>
       </div>
