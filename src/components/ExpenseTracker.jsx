@@ -416,7 +416,7 @@ export default function App() {
           {streak > 0 && <div style={{ padding: "3px 8px", borderRadius: 10, background: vio + "12", border: `1px solid ${vio}25`, fontSize: 11, fontWeight: 600, color: vio }}>🔥 {streak}j</div>}
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1.5 }}>Patrimoine</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtS(totalEur)}</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{fmt(totalEur)}</div>
           </div>
         </div>
       </div>
