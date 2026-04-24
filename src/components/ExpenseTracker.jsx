@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from "recharts";
 import { supabase } from "@/lib/supabase";
 
@@ -40,6 +40,7 @@ const INC_CATS = [
 const GOAL = 200000;
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const fmt = (n) => `${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}€`;
+const fmtSigned = (n) => `${n < 0 ? "-" : ""}${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}€`;
 const fmt2 = (n) => `${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€`;
 const mkey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`; };
 const MN = ["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Août","Sep","Oct","Nov","Déc"];
@@ -99,6 +100,39 @@ const G = ({ children, style, glow, onClick }) => (
   <div onClick={onClick} style={{ background: "rgba(255,255,255,0.025)", border: `1px solid ${glow ? glow + "30" : "rgba(255,255,255,0.05)"}`, borderRadius: 14, ...(glow ? { boxShadow: `0 0 20px ${glow}10` } : {}), ...(onClick ? { cursor: "pointer" } : {}), ...style }}>{children}</div>
 );
 
+// ─── NUMPAD COMPONENT ───
+function NumPad({ value, onChange, color }) {
+  const press = (key) => {
+    if (key === "C") { onChange(""); return; }
+    if (key === "⌫") { onChange(value.slice(0, -1)); return; }
+    if (key === ".") { if (value.includes(".")) return; onChange(value + "."); return; }
+    // Max 2 decimals
+    if (value.includes(".") && value.split(".")[1]?.length >= 2) return;
+    onChange(value + key);
+  };
+  const keys = ["1","2","3","4","5","6","7","8","9",".","0","⌫"];
+  const btnStyle = (k) => ({
+    width: "100%", aspectRatio: "1.6", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)",
+    background: k === "⌫" ? "rgba(255,80,80,0.1)" : "rgba(255,255,255,0.04)",
+    color: k === "⌫" ? "#f47260" : "#e2e8f0", fontSize: 22, fontWeight: 600,
+    fontFamily: "'Outfit', sans-serif", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+  });
+  return (
+    <div>
+      <div style={{ textAlign: "center", marginBottom: 10 }}>
+        <div style={{ fontSize: 40, fontWeight: 700, color: color || "#e2e8f0", minHeight: 50 }}>
+          {value || "0"}<span style={{ fontSize: 18, opacity: 0.5 }}>€</span>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+        {keys.map(k => (
+          <button key={k} onClick={() => press(k)} style={btnStyle(k)}>{k}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [initialBalances, setInitialBalances] = useState({});
@@ -130,7 +164,6 @@ export default function App() {
 
   const prevPctRef = useRef(0);
 
-  // ─── LOAD ALL DATA FROM SUPABASE ───
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
@@ -283,7 +316,6 @@ export default function App() {
 
   const shiftMonth = (d) => { const [y, m] = month.split("-").map(Number); setMonth(mkey(new Date(y, m - 1 + d, 1))); };
 
-  // ─── SUPABASE ACTIONS ───
   const submit = async () => {
     const amount = parseFloat(f.amount); if (!amount || amount <= 0) return;
     if (editTx) {
@@ -331,7 +363,6 @@ export default function App() {
   };
   const delSub = async (id) => { await supabase.from('subscriptions').delete().eq('id', id); setConfirmDelSub(null); await loadAll(); };
 
-  // Refunds
   const addRefund = async () => {
     const a = parseFloat(refundForm.amount); if (!a || !refundForm.label) return;
     await supabase.from('refunds').insert({ id: uid(), label: refundForm.label, amount: a, date: refundForm.date });
@@ -407,7 +438,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ background: bg, color: t1, fontFamily: ff, minHeight: "100vh", fontSize: 13, paddingBottom: 90, maxWidth: 600, margin: "0 auto" }}>
+    <div style={{ background: bg, color: t1, fontFamily: ff, minHeight: "100vh", fontSize: 13, paddingBottom: 90, maxWidth: 900, margin: "0 auto" }}>
 
       {/* HEADER */}
       <div style={{ padding: "16px 16px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -416,7 +447,7 @@ export default function App() {
           {streak > 0 && <div style={{ padding: "3px 8px", borderRadius: 10, background: vio + "12", border: `1px solid ${vio}25`, fontSize: 11, fontWeight: 600, color: vio }}>🔥 {streak}j</div>}
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1.5 }}>Patrimoine</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{totalEur < 0 ? "-" : ""}{fmt(totalEur)}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: totalEur < 0 ? red : t1 }}>{fmtSigned(totalEur)}</div>
           </div>
         </div>
       </div>
@@ -426,7 +457,7 @@ export default function App() {
         <G style={{ padding: "12px 14px" }} glow={vio}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
             <span style={{ fontSize: 11, color: t2 }}>🎯 Objectif</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: vioBright }}>{totalEur < 0 ? "-" : ""}{fmt(totalEur)} / {fmt(goal)}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: vioBright }}>{fmtSigned(totalEur)} / {fmt(goal)}</span>
           </div>
           <div style={{ height: 10, borderRadius: 5, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
             <div style={{ height: "100%", borderRadius: 5, width: `${goalPct}%`, background: `linear-gradient(90deg, ${purple}, ${vioBright}, #e879f9)`, boxShadow: `0 0 16px ${vio}70`, transition: "width 0.8s cubic-bezier(0.4,0,0.2,1)" }} />
@@ -448,7 +479,7 @@ export default function App() {
             {editBal === p.id ? (
               <input type="number" value={editBalVal} onChange={e => setEditBalVal(e.target.value)} autoFocus style={{ ...inputStyle, fontSize: 12, padding: "5px 8px" }}
                 onKeyDown={e => { if (e.key === "Enter") saveBal(p.id); if (e.key === "Escape") setEditBal(null); }} onBlur={() => saveBal(p.id)} />
-            ) : <div style={{ fontWeight: 600, fontSize: 16 }}>{fmt(balances[p.id])}</div>}
+            ) : <div style={{ fontWeight: 600, fontSize: 16, color: balances[p.id] < 0 ? red : t1 }}>{fmtSigned(balances[p.id])}</div>}
           </G>
         ))}
       </div>
@@ -485,7 +516,7 @@ export default function App() {
           </div>
           <G glow={stats.net >= 0 ? green : red} style={{ padding: "10px 14px", marginBottom: 8, textAlign: "center" }}>
             <span style={{ fontSize: 10, color: t2 }}>NET </span>
-            <span style={{ fontSize: 24, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : ""}{fmt(stats.net)}</span>
+            <span style={{ fontSize: 24, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : "-"}{fmt(stats.net)}</span>
           </G>
 
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -494,7 +525,6 @@ export default function App() {
             {totalPendingRefunds > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }} onClick={() => setTab("refunds")}><span style={{ fontSize: 10, color: t2 }}>💸 Remb : </span><span style={{ fontSize: 12, fontWeight: 600, color: "#fbbf24" }}>{fmt(totalPendingRefunds)}</span></G>}
           </div>
 
-          {/* Search + Sort + Filter */}
           <div style={{ display: "flex", gap: 5, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
             <button onClick={() => setShowSearch(!showSearch)} style={{ ...pill(showSearch), padding: "5px 10px" }}>🔍</button>
             <button onClick={() => setSortBy(sortBy === "date" ? "amount" : "date")} style={{ ...pill(false), padding: "5px 10px", fontSize: 11 }}>{sortBy === "date" ? "📅" : "💰"}</button>
@@ -658,7 +688,7 @@ export default function App() {
       {/* MODAL TX */}
       {modal === "tx" && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => { setModal(null); setEditTx(null); }}>
-          <div style={{ background: "#0a0a10", borderRadius: "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480, maxHeight: "85vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+          <div style={{ background: "#0a0a10", borderRadius: "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
             <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />
 
             {!editTx && lastTx && (
@@ -667,17 +697,18 @@ export default function App() {
               </button>
             )}
 
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, textAlign: "center" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, textAlign: "center" }}>
               {editTx ? "✏️ Modifier" : f.type === "expense" ? "➖ Dépense" : f.type === "income" ? "➕ Revenu" : "↔ Transfert"}
             </div>
 
-            <div style={{ textAlign: "center", marginBottom: 14 }}>
-              <input type="number" placeholder="0" value={f.amount} onChange={e => uf("amount", e.target.value)} autoFocus
-                style={{ background: "none", border: "none", color: f.type === "expense" ? red : f.type === "income" ? green : purple, fontFamily: ff, fontSize: 36, fontWeight: 700, textAlign: "center", outline: "none", width: "100%" }} />
-              <div style={{ fontSize: 11, color: t2 }}>EUR</div>
-            </div>
+            {/* NUMPAD */}
+            <NumPad
+              value={f.amount}
+              onChange={(v) => uf("amount", v)}
+              color={f.type === "expense" ? red : f.type === "income" ? green : purple}
+            />
 
-            <div style={{ marginBottom: 10 }}>
+            <div style={{ marginTop: 12, marginBottom: 10 }}>
               <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>{f.type === "transfer" ? "De" : "Plateforme"}</div>
               <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                 {PLATFORMS.map(p => (
