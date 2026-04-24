@@ -166,13 +166,8 @@ export default function App() {
 
   const balances = useMemo(() => {
     const b = {}; PLATFORMS.forEach(p => b[p.id] = initialBalances[p.id] || 0);
-    allTx.forEach(tx => {
-      if (tx.type === "income") b[tx.platform] += tx.amount;
-      else if (tx.type === "expense") b[tx.platform] -= tx.amount;
-      else if (tx.type === "transfer") { b[tx.platform] -= tx.amount; b[tx.to] += tx.amount - (tx.fees || 0); }
-    });
     return b;
-  }, [initialBalances, allTx]);
+  }, [initialBalances]);
 
   const totalEur = useMemo(() => PLATFORMS.reduce((s, p) => s + (balances[p.id] || 0), 0), [balances]);
   const goalPct = Math.min(Math.max((totalEur / (goal || GOAL)) * 100, 0), 100);
