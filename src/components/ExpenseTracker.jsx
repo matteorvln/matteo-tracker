@@ -29,7 +29,7 @@ const EXP_CATS = [
 const INC_CATS = [
   { id: "celsius", name: "Celsius", emoji: "🎰", color: "#fbbf24" },
   { id: "rainbet_video", name: "Rainbet", emoji: "🎬", color: "#34d399" },
-  { id: "rainbet_gains", name: "RB Gains", emoji: "🎲", color: "#4ade80" },
+  { id: "youtube", name: "YouTube", emoji: "▶️", color: "#ef4444" },
   { id: "mobilfox", name: "Mobilfox", emoji: "📱", color: "#818cf8" },
   { id: "tiktok_fr", name: "TikTok FR", emoji: "🇫🇷", color: "#f87171" },
   { id: "unfamous", name: "Unfamous", emoji: "👕", color: "#c084fc" },
@@ -43,6 +43,7 @@ const fmt = (n) => `${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigit
 const fmtSigned = (n) => `${n < 0 ? "-" : ""}${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}€`;
 const fmt2 = (n) => `${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€`;
 const mkey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`; };
+const dkey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
 const MN = ["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Août","Sep","Oct","Nov","Déc"];
 const mlabel = (k) => { const [y, m] = k.split("-"); return MN[+m - 1] + " " + y; };
 const mshort = (k) => MN[+k.split("-")[1] - 1];
@@ -100,13 +101,123 @@ const G = ({ children, style, glow, onClick }) => (
   <div onClick={onClick} style={{ background: "rgba(255,255,255,0.025)", border: `1px solid ${glow ? glow + "30" : "rgba(255,255,255,0.05)"}`, borderRadius: 14, ...(glow ? { boxShadow: `0 0 20px ${glow}10` } : {}), ...(onClick ? { cursor: "pointer" } : {}), ...style }}>{children}</div>
 );
 
+// ─── HEATMAP COMPONENT ───
+function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
+  // Build daily totals for the year
+  const dailyData = useMemo(() => {
+    const map = {};
+    allTx.forEach(tx => {
+      if (tx.type !== "expense") return;
+      const txYear = new Date(tx.date).getFullYear();
+      if (txYear !== year) return;
+      map[tx.date] = (map[tx.date] || 0) + tx.amount;
+    });
+    return map;
+  }, [allTx, year]);
+
+  // Find max for color scaling
+  const maxVal = Math.max(...Object.values(dailyData), 1);
+
+  // Build grid: weeks (columns) × days of week (rows)
+  // Start from Jan 1 of year, find the Monday before or on it
+  const yearStart = new Date(year, 0, 1);
+  const yearEnd = new Date(year, 11, 31);
+  // getDay: 0=Sun, 1=Mon, ..., 6=Sat. We want Monday-first.
+  const startDayOfWeek = (yearStart.getDay() + 6) % 7; // 0=Mon ... 6=Sun
+  const gridStart = new Date(yearStart);
+  gridStart.setDate(gridStart.getDate() - startDayOfWeek);
+
+  const cells = [];
+  const cur = new Date(gridStart);
+  while (cur <= yearEnd || cells.length % 7 !== 0) {
+    const k = dkey(cur);
+    const inYear = cur.getFullYear() === year;
+    cells.push({
+      date: k,
+      day: cur.getDate(),
+      month: cur.getMonth(),
+      inYear,
+      value: dailyData[k] || 0,
+    });
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  // Build month labels (one per month, at first week containing that month)
+  const monthLabels = [];
+  let lastMonth = -1;
+  cells.forEach((c, i) => {
+    if (i % 7 === 0 && c.inYear && c.month !== lastMonth) {
+      monthLabels.push({ week: i / 7, month: c.month });
+      lastMonth = c.month;
+    }
+  });
+
+  const cellSize = 11;
+  const gap = 2;
+  const totalWeeks = Math.ceil(cells.length / 7);
+  const width = totalWeeks * (cellSize + gap);
+  const height = 7 * (cellSize + gap) + 18;
+
+  const colorFor = (val) => {
+    if (val === 0) return "rgba(255,255,255,0.04)";
+    const intensity = Math.min(val / maxVal, 1);
+    // Scale: low = pale red, high = deep red
+    if (intensity < 0.25) return "rgba(244,114,96,0.25)";
+    if (intensity < 0.5) return "rgba(244,114,96,0.5)";
+    if (intensity < 0.75) return "rgba(244,114,96,0.75)";
+    return "rgba(244,114,96,1)";
+  };
+
+  return (
+    <div style={{ overflowX: "auto", scrollbarWidth: "thin" }}>
+      <svg width={width} height={height} style={{ display: "block", minWidth: width }}>
+        {monthLabels.map(({ week, month }) => (
+          <text key={month} x={week * (cellSize + gap)} y={10} fill={t2} fontSize={9} fontFamily="'Outfit', sans-serif">
+            {MN[month]}
+          </text>
+        ))}
+        {cells.map((c, i) => {
+          const week = Math.floor(i / 7);
+          const day = i % 7;
+          if (!c.inYear) return null;
+          const isSelected = selectedDate === c.date;
+          return (
+            <rect
+              key={c.date}
+              x={week * (cellSize + gap)}
+              y={18 + day * (cellSize + gap)}
+              width={cellSize}
+              height={cellSize}
+              rx={2}
+              fill={colorFor(c.value)}
+              stroke={isSelected ? "#a78bfa" : "transparent"}
+              strokeWidth={isSelected ? 1.5 : 0}
+              style={{ cursor: "pointer" }}
+              onClick={() => onCellClick(c.date)}
+            >
+              <title>{c.date} : {fmt2(c.value)}</title>
+            </rect>
+          );
+        })}
+      </svg>
+      {/* Legend */}
+      <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 9, color: t2 }}>
+        <span>Moins</span>
+        {["rgba(255,255,255,0.04)", "rgba(244,114,96,0.25)", "rgba(244,114,96,0.5)", "rgba(244,114,96,0.75)", "rgba(244,114,96,1)"].map(c => (
+          <div key={c} style={{ width: 11, height: 11, borderRadius: 2, background: c }} />
+        ))}
+        <span>Plus</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── NUMPAD COMPONENT ───
 function NumPad({ value, onChange, color }) {
   const press = (key) => {
     if (key === "C") { onChange(""); return; }
     if (key === "⌫") { onChange(value.slice(0, -1)); return; }
     if (key === ".") { if (value.includes(".")) return; onChange(value + "."); return; }
-    // Max 2 decimals
     if (value.includes(".") && value.split(".")[1]?.length >= 2) return;
     onChange(value + key);
   };
@@ -156,6 +267,8 @@ export default function App() {
   const [editTx, setEditTx] = useState(null);
   const [eleaFilter, setEleaFilter] = useState(false);
   const [refundForm, setRefundForm] = useState({ label: "", amount: "", date: new Date().toISOString().split("T")[0] });
+  const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
+  const [heatmapSelectedDate, setHeatmapSelectedDate] = useState(null);
 
   const [f, setF] = useState({ type: "expense", amount: "", platform: "revolut", category: "quotidien", incCategory: "rainbet_video", note: "", date: new Date().toISOString().split("T")[0], to: "phantom", fees: "" });
   const uf = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -313,6 +426,31 @@ export default function App() {
 
   const pendingRefunds = refunds.filter(r => !r.resolved);
   const totalPendingRefunds = pendingRefunds.reduce((s, r) => s + r.amount, 0);
+
+  // Heatmap stats
+  const heatmapStats = useMemo(() => {
+    const yearTx = allTx.filter(tx => tx.type === "expense" && new Date(tx.date).getFullYear() === heatmapYear);
+    const total = yearTx.reduce((s, tx) => s + tx.amount, 0);
+    const byDay = {};
+    yearTx.forEach(tx => { byDay[tx.date] = (byDay[tx.date] || 0) + tx.amount; });
+    const days = Object.keys(byDay);
+    const daysWithExp = days.length;
+    const maxDay = days.reduce((max, d) => byDay[d] > (byDay[max] || 0) ? d : max, days[0]);
+    const avgPerDay = daysWithExp > 0 ? total / daysWithExp : 0;
+    return { total, daysWithExp, maxDay, maxDayAmount: maxDay ? byDay[maxDay] : 0, avgPerDay };
+  }, [allTx, heatmapYear]);
+
+  const selectedDayTx = useMemo(() => {
+    if (!heatmapSelectedDate) return [];
+    return allTx.filter(tx => tx.date === heatmapSelectedDate).sort((a, b) => b.amount - a.amount);
+  }, [allTx, heatmapSelectedDate]);
+
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set();
+    transactions.forEach(tx => yearsSet.add(new Date(tx.date).getFullYear()));
+    yearsSet.add(new Date().getFullYear());
+    return [...yearsSet].sort((a, b) => b - a);
+  }, [transactions]);
 
   const shiftMonth = (d) => { const [y, m] = month.split("-").map(Number); setMonth(mkey(new Date(y, m - 1 + d, 1))); };
 
@@ -486,7 +624,7 @@ export default function App() {
 
       {/* TABS */}
       <div style={{ padding: "0 16px 8px", display: "flex", gap: 5, overflowX: "auto", scrollbarWidth: "none" }}>
-        {[["home","Accueil"],["details","Détails"],["chart","Évolution"],["subs","Abos"],["refunds","💸 Remb."]].map(([k,l]) => (
+        {[["home","Accueil"],["details","Détails"],["chart","Évolution"],["heatmap","📅 Heatmap"],["subs","Abos"],["refunds","💸 Remb."]].map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)} style={pill(tab === k)}>{l}</button>
         ))}
         <button onClick={exportCSV} style={{ ...pill(false), marginLeft: "auto", fontSize: 11 }}>↓ CSV</button>
@@ -621,6 +759,62 @@ export default function App() {
               </AreaChart>
             </ResponsiveContainer>
           </G>
+        </>)}
+
+        {/* HEATMAP */}
+        {tab === "heatmap" && (<>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>📅 Heatmap des dépenses</div>
+            <div style={{ display: "flex", gap: 5 }}>
+              {availableYears.map(y => (
+                <button key={y} onClick={() => { setHeatmapYear(y); setHeatmapSelectedDate(null); }} style={pill(heatmapYear === y)}>{y}</button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+            <G style={{ padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Total {heatmapYear}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: red }}>{fmt(heatmapStats.total)}</div>
+            </G>
+            <G style={{ padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Jours actifs</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: vio }}>{heatmapStats.daysWithExp}j</div>
+            </G>
+            <G style={{ padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Moy / jour actif</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: t1 }}>{fmt(heatmapStats.avgPerDay)}</div>
+            </G>
+            <G style={{ padding: "10px 12px", cursor: heatmapStats.maxDay ? "pointer" : "default" }} onClick={() => heatmapStats.maxDay && setHeatmapSelectedDate(heatmapStats.maxDay)}>
+              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Pire journée</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#fbbf24" }}>
+                {heatmapStats.maxDay ? `${new Date(heatmapStats.maxDay).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} • ${fmt(heatmapStats.maxDayAmount)}` : "—"}
+              </div>
+            </G>
+          </div>
+
+          <G style={{ padding: 14, marginBottom: 10 }}>
+            <Heatmap allTx={allTx} year={heatmapYear} onCellClick={setHeatmapSelectedDate} selectedDate={heatmapSelectedDate} t2={t2} red={red} />
+          </G>
+
+          {heatmapSelectedDate && (
+            <G style={{ padding: 14 }} glow={vio}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>
+                  {new Date(heatmapSelectedDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                </div>
+                <button onClick={() => setHeatmapSelectedDate(null)} style={{ background: "none", border: "none", color: t2, cursor: "pointer", fontSize: 14 }}>✕</button>
+              </div>
+              {selectedDayTx.length === 0 && <div style={{ fontSize: 12, color: t2, textAlign: "center", padding: 12 }}>Aucune transaction ce jour-là</div>}
+              {selectedDayTx.map(tx => <TxRow key={tx.id} tx={tx} />)}
+            </G>
+          )}
+
+          {!heatmapSelectedDate && (
+            <div style={{ fontSize: 11, color: t2, textAlign: "center", marginTop: 10 }}>
+              💡 Clique sur un carré pour voir le détail de ce jour
+            </div>
+          )}
         </>)}
 
         {/* SUBS */}
