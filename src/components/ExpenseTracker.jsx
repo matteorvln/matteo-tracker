@@ -45,6 +45,7 @@ const fmt2 = (n) => `${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigi
 const mkey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`; };
 const dkey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
 const MN = ["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Août","Sep","Oct","Nov","Déc"];
+const DOW = ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
 const mlabel = (k) => { const [y, m] = k.split("-"); return MN[+m - 1] + " " + y; };
 const mshort = (k) => MN[+k.split("-")[1] - 1];
 
@@ -79,6 +80,18 @@ function genRec(subs, mk) {
   });
 }
 
+// ─── HOOK : largeur écran ───
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const check = () => setIsDesktop(window.innerWidth >= 900);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return isDesktop;
+}
+
 function Donut({ data, size = 130 }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (total === 0) return <svg width={size} height={size} viewBox="0 0 130 130"><circle cx="65" cy="65" r="48" fill="none" stroke="#ffffff06" strokeWidth="14" /><text x="65" y="69" textAnchor="middle" fill="#475569" fontSize="12" fontFamily="inherit">0€</text></svg>;
@@ -103,7 +116,6 @@ const G = ({ children, style, glow, onClick }) => (
 
 // ─── HEATMAP COMPONENT ───
 function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
-  // Build daily totals for the year
   const dailyData = useMemo(() => {
     const map = {};
     allTx.forEach(tx => {
@@ -115,15 +127,11 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
     return map;
   }, [allTx, year]);
 
-  // Find max for color scaling
   const maxVal = Math.max(...Object.values(dailyData), 1);
 
-  // Build grid: weeks (columns) × days of week (rows)
-  // Start from Jan 1 of year, find the Monday before or on it
   const yearStart = new Date(year, 0, 1);
   const yearEnd = new Date(year, 11, 31);
-  // getDay: 0=Sun, 1=Mon, ..., 6=Sat. We want Monday-first.
-  const startDayOfWeek = (yearStart.getDay() + 6) % 7; // 0=Mon ... 6=Sun
+  const startDayOfWeek = (yearStart.getDay() + 6) % 7;
   const gridStart = new Date(yearStart);
   gridStart.setDate(gridStart.getDate() - startDayOfWeek);
 
@@ -142,7 +150,6 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
     cur.setDate(cur.getDate() + 1);
   }
 
-  // Build month labels (one per month, at first week containing that month)
   const monthLabels = [];
   let lastMonth = -1;
   cells.forEach((c, i) => {
@@ -161,7 +168,6 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
   const colorFor = (val) => {
     if (val === 0) return "rgba(255,255,255,0.04)";
     const intensity = Math.min(val / maxVal, 1);
-    // Scale: low = pale red, high = deep red
     if (intensity < 0.25) return "rgba(244,114,96,0.25)";
     if (intensity < 0.5) return "rgba(244,114,96,0.5)";
     if (intensity < 0.75) return "rgba(244,114,96,0.75)";
@@ -200,7 +206,6 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
           );
         })}
       </svg>
-      {/* Legend */}
       <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 9, color: t2 }}>
         <span>Moins</span>
         {["rgba(255,255,255,0.04)", "rgba(244,114,96,0.25)", "rgba(244,114,96,0.5)", "rgba(244,114,96,0.75)", "rgba(244,114,96,1)"].map(c => (
@@ -245,6 +250,7 @@ function NumPad({ value, onChange, color }) {
 }
 
 export default function App() {
+  const isDesktop = useIsDesktop();
   const [transactions, setTransactions] = useState([]);
   const [initialBalances, setInitialBalances] = useState({});
   const [subscriptions, setSubscriptions] = useState([]);
@@ -357,10 +363,76 @@ export default function App() {
   const prevStats = useMemo(() => {
     const [y, m] = month.split("-").map(Number);
     const pmk = mkey(new Date(y, m - 2, 1));
-    let exp = 0;
-    allTx.filter(tx => mkey(tx.date) === pmk).forEach(tx => { if (tx.type === "expense") exp += tx.amount; });
-    return { exp };
+    let exp = 0; const bc = {};
+    allTx.filter(tx => mkey(tx.date) === pmk).forEach(tx => {
+      if (tx.type === "expense") { exp += tx.amount; bc[tx.category] = (bc[tx.category] || 0) + tx.amount; }
+    });
+    return { exp, bc };
   }, [allTx, month]);
+
+  // ─── STATS AVANCÉES POUR L'ONGLET DÉTAILS ───
+  const advStats = useMemo(() => {
+    const monthExp = allTx.filter(tx => mkey(tx.date) === month && tx.type === "expense");
+    const [y, m] = month.split("-").map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const today = new Date();
+    const isCurrentMonth = mkey(today) === month;
+    const daysElapsed = isCurrentMonth ? today.getDate() : daysInMonth;
+
+    const total = monthExp.reduce((s, tx) => s + tx.amount, 0);
+    const avgPerDayMonth = total / daysInMonth;
+    const avgPerDayElapsed = daysElapsed > 0 ? total / daysElapsed : 0;
+
+    const byDay = {};
+    monthExp.forEach(tx => { byDay[tx.date] = (byDay[tx.date] || 0) + tx.amount; });
+    const activeDays = Object.keys(byDay).length;
+    const avgPerActiveDay = activeDays > 0 ? total / activeDays : 0;
+
+    const amounts = monthExp.map(tx => tx.amount).sort((a, b) => a - b);
+    const median = amounts.length === 0 ? 0 : amounts.length % 2 === 0
+      ? (amounts[amounts.length / 2 - 1] + amounts[amounts.length / 2]) / 2
+      : amounts[Math.floor(amounts.length / 2)];
+    const maxTx = monthExp.length > 0 ? monthExp.reduce((m, t) => t.amount > m.amount ? t : m) : null;
+
+    // Dépenses par jour de la semaine
+    const byDow = [0,0,0,0,0,0,0]; const byDowCount = [0,0,0,0,0,0,0];
+    monthExp.forEach(tx => {
+      const d = new Date(tx.date).getDay();
+      byDow[d] += tx.amount; byDowCount[d]++;
+    });
+    const maxDow = byDow.indexOf(Math.max(...byDow));
+
+    // Projection fin de mois
+    const projection = isCurrentMonth && daysElapsed > 0 ? avgPerDayElapsed * daysInMonth : total;
+
+    return {
+      total, avgPerDayMonth, avgPerDayElapsed, avgPerActiveDay,
+      activeDays, txCount: monthExp.length, median,
+      maxTx, byDow, byDowCount, maxDow,
+      projection, daysInMonth, daysElapsed, isCurrentMonth,
+    };
+  }, [allTx, month]);
+
+  // Comparaison mois actuel vs mois dernier par catégorie
+  const catComparison = useMemo(() => {
+    return EXP_CATS.map(c => {
+      const cur = stats.bc[c.id] || 0;
+      const prev = prevStats.bc[c.id] || 0;
+      const diff = cur - prev;
+      const diffPct = prev > 0 ? ((cur - prev) / prev) * 100 : (cur > 0 ? 100 : 0);
+      return { ...c, current: cur, previous: prev, diff, diffPct };
+    }).filter(c => c.current > 0 || c.previous > 0).sort((a, b) => b.current - a.current);
+  }, [stats.bc, prevStats.bc]);
+
+  // Répartition de l'argent par plateforme (sur le total positif)
+  const moneyDistribution = useMemo(() => {
+    const positives = PLATFORMS.map(p => ({ ...p, amount: Math.max(balances[p.id] || 0, 0) }));
+    const totalPos = positives.reduce((s, p) => s + p.amount, 0);
+    return positives.map(p => ({
+      ...p,
+      pct: totalPos > 0 ? (p.amount / totalPos) * 100 : 0,
+    })).sort((a, b) => b.amount - a.amount);
+  }, [balances]);
 
   const insight = useMemo(() => {
     if (prevStats.exp === 0 && stats.exp === 0) return null;
@@ -427,7 +499,6 @@ export default function App() {
   const pendingRefunds = refunds.filter(r => !r.resolved);
   const totalPendingRefunds = pendingRefunds.reduce((s, r) => s + r.amount, 0);
 
-  // Heatmap stats
   const heatmapStats = useMemo(() => {
     const yearTx = allTx.filter(tx => tx.type === "expense" && new Date(tx.date).getFullYear() === heatmapYear);
     const total = yearTx.reduce((s, tx) => s + tx.amount, 0);
@@ -524,7 +595,7 @@ export default function App() {
 
   const donutExp = EXP_CATS.map(c => ({ value: stats.bc[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0);
   const donutInc = INC_CATS.map(c => ({ value: stats.ic[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0);
-  const visTx = showAllTx ? mTx : mTx.slice(0, 6);
+  const visTx = showAllTx ? mTx : mTx.slice(0, isDesktop ? 10 : 6);
 
   const pill = (active, color) => ({
     padding: "7px 14px", borderRadius: 20, border: `1px solid ${active ? (color || vio) + "50" : "rgba(255,255,255,0.05)"}`,
@@ -575,6 +646,561 @@ export default function App() {
     );
   };
 
+  // ─── COMPOSANT MONTH SWITCHER (réutilisable) ───
+  const MonthSwitcher = ({ size = "normal" }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: size === "big" ? 24 : 20, marginBottom: size === "big" ? 14 : 10 }}>
+      <button onClick={() => shiftMonth(-1)} style={{ background: "none", border: "none", color: t2, fontSize: size === "big" ? 26 : 22, cursor: "pointer", fontFamily: ff }}>‹</button>
+      <span style={{ fontSize: size === "big" ? 19 : 17, fontWeight: 600 }}>{mlabel(month)}</span>
+      <button onClick={() => shiftMonth(1)} style={{ background: "none", border: "none", color: t2, fontSize: size === "big" ? 26 : 22, cursor: "pointer", fontFamily: ff }}>›</button>
+    </div>
+  );
+
+  // ============ DESKTOP NAV ITEMS ============
+  const navItems = [
+    ["home", "🏠", "Accueil"],
+    ["details", "📊", "Détails"],
+    ["chart", "📈", "Évolution"],
+    ["heatmap", "📅", "Heatmap"],
+    ["subs", "🔄", "Abos"],
+    ["refunds", "💸", "Remb."],
+  ];
+
+  // ============ RENDER ============
+  // On a deux modes : DESKTOP (≥900px) ou MOBILE (<900px)
+  // Le contenu des onglets est partagé via une fonction renderTab()
+
+  const renderTab = () => (
+    <>
+      {/* HOME */}
+      {tab === "home" && (<>
+        <MonthSwitcher size={isDesktop ? "big" : "normal"} />
+
+        {insight && <div style={{ padding: "8px 14px", marginBottom: isDesktop ? 14 : 8, borderRadius: 10, background: insight.color + "10", border: `1px solid ${insight.color}20`, fontSize: 12, color: insight.color, fontWeight: 500, textAlign: "center" }}>{insight.text}</div>}
+
+        {isDesktop ? (
+          // ─── DESKTOP HOME : 2 colonnes ───
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 18 }}>
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <G glow={green} style={{ padding: "18px" }}>
+                  <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>Rentrées</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: green }}>+{fmt(stats.inc)}</div>
+                </G>
+                <G glow={red} style={{ padding: "18px" }}>
+                  <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>Dépenses</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: red }}>-{fmt(stats.exp)}</div>
+                </G>
+              </div>
+              <G glow={stats.net >= 0 ? green : red} style={{ padding: "16px 18px", marginBottom: 12, textAlign: "center" }}>
+                <span style={{ fontSize: 11, color: t2, letterSpacing: 1.2 }}>NET </span>
+                <span style={{ fontSize: 30, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : "-"}{fmt(stats.net)}</span>
+              </G>
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                {totalSubsMonth > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>📱 Abos</div><div style={{ fontSize: 13, fontWeight: 600, color: vio }}>{fmt(totalSubsMonth)}/mois</div></G>}
+                {eleaTotal > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>💕 Elea</div><div style={{ fontSize: 13, fontWeight: 600, color: "#f472b6" }}>{fmt(eleaTotal)}</div></G>}
+                {totalPendingRefunds > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }} onClick={() => setTab("refunds")}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>💸 Remb.</div><div style={{ fontSize: 13, fontWeight: 600, color: "#fbbf24" }}>{fmt(totalPendingRefunds)}</div></G>}
+              </div>
+
+              {/* Mini donut dépenses */}
+              {donutExp.length > 0 && (
+                <G style={{ padding: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12, color: red }}>Dépenses du mois</div>
+                  <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                    <Donut data={donutExp} size={120} />
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {donutExp.slice(0, 5).map(d => (
+                        <div key={d.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color }} />
+                            <span style={{ fontSize: 11, color: t2 }}>{d.label}</span>
+                          </div>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: t1 }}>{fmt(d.value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </G>
+              )}
+            </div>
+
+            <div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <button onClick={() => setShowSearch(!showSearch)} style={{ ...pill(showSearch), padding: "6px 12px" }}>🔍</button>
+                <button onClick={() => setSortBy(sortBy === "date" ? "amount" : "date")} style={{ ...pill(false), padding: "6px 12px", fontSize: 11 }}>{sortBy === "date" ? "📅 Date" : "💰 Montant"}</button>
+                <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "6px 12px", fontSize: 11 }}>💕 Elea</button>
+                <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+                  <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "6px 10px", fontSize: 11 }}>Tout</button>
+                  {PLATFORMS.map(p => <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "6px 10px", fontSize: 11 }} title={p.name}>{p.icon}</button>)}
+                </div>
+              </div>
+              {showSearch && <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." autoFocus style={{ ...inputStyle, marginBottom: 10, fontSize: 13 }} />}
+
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Transactions ({mTx.length})</div>
+              {mTx.length === 0 && <G style={{ padding: 30, textAlign: "center" }}><span style={{ color: t2 }}>Aucune transaction</span></G>}
+              {visTx.map(tx => <TxRow key={tx.id} tx={tx} />)}
+              {mTx.length > 10 && <button onClick={() => setShowAllTx(!showAllTx)} style={{ ...pill(false), width: "100%", marginTop: 6, textAlign: "center", display: "block" }}>{showAllTx ? "Voir moins" : `Tout voir (${mTx.length})`}</button>}
+            </div>
+          </div>
+        ) : (
+          // ─── MOBILE HOME (inchangé) ───
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <G glow={green} style={{ padding: "14px" }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Rentrées</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: green }}>+{fmt(stats.inc)}</div>
+              </G>
+              <G glow={red} style={{ padding: "14px" }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Dépenses</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: red }}>-{fmt(stats.exp)}</div>
+              </G>
+            </div>
+            <G glow={stats.net >= 0 ? green : red} style={{ padding: "10px 14px", marginBottom: 8, textAlign: "center" }}>
+              <span style={{ fontSize: 10, color: t2 }}>NET </span>
+              <span style={{ fontSize: 24, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : "-"}{fmt(stats.net)}</span>
+            </G>
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              {totalSubsMonth > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }}><span style={{ fontSize: 10, color: t2 }}>📱 Abos : </span><span style={{ fontSize: 12, fontWeight: 600, color: vio }}>{fmt(totalSubsMonth)}/mois</span></G>}
+              {eleaTotal > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }}><span style={{ fontSize: 10, color: t2 }}>💕 Elea : </span><span style={{ fontSize: 12, fontWeight: 600, color: "#f472b6" }}>{fmt(eleaTotal)}</span></G>}
+              {totalPendingRefunds > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }} onClick={() => setTab("refunds")}><span style={{ fontSize: 10, color: t2 }}>💸 Remb : </span><span style={{ fontSize: 12, fontWeight: 600, color: "#fbbf24" }}>{fmt(totalPendingRefunds)}</span></G>}
+            </div>
+
+            <div style={{ display: "flex", gap: 5, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <button onClick={() => setShowSearch(!showSearch)} style={{ ...pill(showSearch), padding: "5px 10px" }}>🔍</button>
+              <button onClick={() => setSortBy(sortBy === "date" ? "amount" : "date")} style={{ ...pill(false), padding: "5px 10px", fontSize: 11 }}>{sortBy === "date" ? "📅" : "💰"}</button>
+              <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "5px 10px", fontSize: 11 }}>💕</button>
+              <div style={{ display: "flex", gap: 3, overflowX: "auto", scrollbarWidth: "none" }}>
+                <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "5px 8px", fontSize: 10 }}>Tout</button>
+                {PLATFORMS.map(p => <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "5px 8px", fontSize: 10 }}>{p.icon}</button>)}
+              </div>
+            </div>
+            {showSearch && <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." autoFocus style={{ ...inputStyle, marginBottom: 6, fontSize: 13 }} />}
+
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Transactions</div>
+            {mTx.length === 0 && <G style={{ padding: 24, textAlign: "center" }}><span style={{ color: t2 }}>Aucune transaction</span></G>}
+            {visTx.map(tx => <TxRow key={tx.id} tx={tx} />)}
+            {mTx.length > 6 && <button onClick={() => setShowAllTx(!showAllTx)} style={{ ...pill(false), width: "100%", marginTop: 4, textAlign: "center", display: "block" }}>{showAllTx ? "Voir moins" : `Tout voir (${mTx.length})`}</button>}
+          </>
+        )}
+      </>)}
+
+      {/* DETAILS - REFONTE */}
+      {tab === "details" && (<>
+        <MonthSwitcher size={isDesktop ? "big" : "normal"} />
+
+        {/* STATS GLOBALES — 6 cards */}
+        <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "repeat(6, 1fr)" : "repeat(2, 1fr)", gap: isDesktop ? 10 : 8, marginBottom: isDesktop ? 16 : 12 }}>
+          <G style={{ padding: isDesktop ? "14px" : "12px" }}>
+            <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>€ / jour</div>
+            <div style={{ fontSize: isDesktop ? 18 : 16, fontWeight: 700, color: t1 }}>{fmt(advStats.avgPerDayElapsed)}</div>
+            <div style={{ fontSize: 9, color: t2, marginTop: 2 }}>sur {advStats.daysElapsed}j</div>
+          </G>
+          <G style={{ padding: isDesktop ? "14px" : "12px" }}>
+            <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>€ / jour actif</div>
+            <div style={{ fontSize: isDesktop ? 18 : 16, fontWeight: 700, color: vio }}>{fmt(advStats.avgPerActiveDay)}</div>
+            <div style={{ fontSize: 9, color: t2, marginTop: 2 }}>{advStats.activeDays} jours</div>
+          </G>
+          <G style={{ padding: isDesktop ? "14px" : "12px" }}>
+            <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Médiane</div>
+            <div style={{ fontSize: isDesktop ? 18 : 16, fontWeight: 700, color: t1 }}>{fmt(advStats.median)}</div>
+            <div style={{ fontSize: 9, color: t2, marginTop: 2 }}>par tx</div>
+          </G>
+          <G style={{ padding: isDesktop ? "14px" : "12px" }}>
+            <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Plus grosse</div>
+            <div style={{ fontSize: isDesktop ? 18 : 16, fontWeight: 700, color: red }}>{advStats.maxTx ? fmt(advStats.maxTx.amount) : "—"}</div>
+            <div style={{ fontSize: 9, color: t2, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{advStats.maxTx?.note || EXP_CATS.find(c => c.id === advStats.maxTx?.category)?.name || "—"}</div>
+          </G>
+          <G style={{ padding: isDesktop ? "14px" : "12px" }}>
+            <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Transactions</div>
+            <div style={{ fontSize: isDesktop ? 18 : 16, fontWeight: 700, color: t1 }}>{advStats.txCount}</div>
+            <div style={{ fontSize: 9, color: t2, marginTop: 2 }}>ce mois</div>
+          </G>
+          <G style={{ padding: isDesktop ? "14px" : "12px" }}>
+            <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>{advStats.isCurrentMonth ? "Projection" : "Total"}</div>
+            <div style={{ fontSize: isDesktop ? 18 : 16, fontWeight: 700, color: advStats.isCurrentMonth ? "#fbbf24" : red }}>{fmt(advStats.projection)}</div>
+            <div style={{ fontSize: 9, color: t2, marginTop: 2 }}>{advStats.isCurrentMonth ? "fin de mois" : "réalisé"}</div>
+          </G>
+        </div>
+
+        {isDesktop ? (
+          // ─── DESKTOP DÉTAILS : grille 2 cols ───
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            {/* Donut dépenses */}
+            <G style={{ padding: 18 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: red }}>📤 Dépenses par catégorie</div>
+              <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
+                <Donut data={donutExp} size={140} />
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}>
+                  {donutExp.length === 0 && <span style={{ fontSize: 11, color: t2 }}>—</span>}
+                  {donutExp.map(d => <div key={d.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 8, height: 8, borderRadius: 2, background: d.color }} /><span style={{ fontSize: 11, color: t2 }}>{d.label}</span></div><span style={{ fontSize: 11, fontWeight: 600, color: t1 }}>{fmt(d.value)}</span></div>)}
+                </div>
+              </div>
+            </G>
+
+            {/* Donut revenus */}
+            <G style={{ padding: 18 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: green }}>📥 Revenus par source</div>
+              <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
+                <Donut data={donutInc} size={140} />
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}>
+                  {donutInc.length === 0 && <span style={{ fontSize: 11, color: t2 }}>—</span>}
+                  {donutInc.map(d => <div key={d.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 8, height: 8, borderRadius: 2, background: d.color }} /><span style={{ fontSize: 11, color: t2 }}>{d.label}</span></div><span style={{ fontSize: 11, fontWeight: 600, color: t1 }}>{fmt(d.value)}</span></div>)}
+                </div>
+              </div>
+            </G>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+            <G style={{ padding: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: red }}>Dépenses</div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                <Donut data={donutExp} />
+                {donutExp.map(d => <div key={d.label} style={{ display: "flex", justifyContent: "space-between", width: "100%" }}><div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 7, height: 7, borderRadius: 2, background: d.color }} /><span style={{ fontSize: 10, color: t2 }}>{d.label}</span></div><span style={{ fontSize: 10, fontWeight: 600, color: t2 }}>{fmt(d.value)}</span></div>)}
+                {donutExp.length === 0 && <span style={{ fontSize: 10, color: t2 }}>—</span>}
+              </div>
+            </G>
+            <G style={{ padding: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: green }}>Revenus</div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                <Donut data={donutInc} />
+                {donutInc.map(d => <div key={d.label} style={{ display: "flex", justifyContent: "space-between", width: "100%" }}><div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 7, height: 7, borderRadius: 2, background: d.color }} /><span style={{ fontSize: 10, color: t2 }}>{d.label}</span></div><span style={{ fontSize: 10, fontWeight: 600, color: t2 }}>{fmt(d.value)}</span></div>)}
+                {donutInc.length === 0 && <span style={{ fontSize: 10, color: t2 }}>—</span>}
+              </div>
+            </G>
+          </div>
+        )}
+
+        {/* RÉPARTITION DE L'ARGENT (desktop only en grille, sinon stack) */}
+        <G glow={vio} style={{ padding: isDesktop ? 18 : 14, marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: vioBright }}>💰 Où est ton argent ?</div>
+            <div style={{ fontSize: 11, color: t2 }}>Répartition par compte</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {moneyDistribution.map(p => (
+              <div key={p.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 22, height: 22, borderRadius: 6, background: p.color + "20", color: p.color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 11 }}>{p.icon}</div>
+                    <span style={{ fontSize: 12, fontWeight: 500 }}>{p.name}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 11, color: t2 }}>{p.pct.toFixed(1)}%</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: t1, minWidth: 70, textAlign: "right" }}>{fmtSigned(balances[p.id])}</span>
+                  </div>
+                </div>
+                <div style={{ height: 8, borderRadius: 4, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${p.pct}%`, background: p.color, boxShadow: `0 0 10px ${p.color}60`, transition: "width 0.6s" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </G>
+
+        {/* DÉPENSES PAR JOUR DE LA SEMAINE */}
+        <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr", gap: 14, marginBottom: 14 }}>
+          <G style={{ padding: isDesktop ? 18 : 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>📆 Par jour de la semaine</div>
+            <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 6, height: 100 }}>
+              {[1,2,3,4,5,6,0].map(idx => {
+                const max = Math.max(...advStats.byDow, 1);
+                const h = (advStats.byDow[idx] / max) * 100;
+                const isMax = idx === advStats.maxDow && advStats.byDow[idx] > 0;
+                return (
+                  <div key={idx} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                    <div style={{ fontSize: 9, color: t2, fontWeight: 600 }}>{advStats.byDow[idx] > 0 ? fmt(advStats.byDow[idx]) : ""}</div>
+                    <div style={{ width: "100%", height: `${h}%`, minHeight: advStats.byDow[idx] > 0 ? 4 : 0, borderRadius: "4px 4px 0 0", background: isMax ? red : vio + "60", boxShadow: isMax ? `0 0 12px ${red}50` : "none", transition: "height 0.5s" }} />
+                    <div style={{ fontSize: 10, color: isMax ? red : t2, fontWeight: isMax ? 600 : 400 }}>{DOW[idx]}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </G>
+
+          <G style={{ padding: isDesktop ? 18 : 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>🏆 Top 5 dépenses</div>
+            {[...allTx.filter(tx => mkey(tx.date) === month && tx.type === "expense")].sort((a, b) => b.amount - a.amount).slice(0, 5).map((tx, i) => {
+              const cat = EXP_CATS.find(c => c.id === tx.category);
+              return <div key={tx.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: i < 4 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center" }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 11, color: t2, width: 18 }}>#{i+1}</span><span style={{ fontSize: 14 }}>{cat?.emoji || "📦"}</span><span style={{ fontSize: 12 }}>{tx.note || cat?.name}</span></div><span style={{ fontSize: 13, fontWeight: 600, color: red }}>{fmt2(tx.amount)}</span></div>;
+            })}
+            {advStats.txCount === 0 && <div style={{ fontSize: 11, color: t2, textAlign: "center", padding: 20 }}>Aucune dépense ce mois</div>}
+          </G>
+        </div>
+
+        {/* COMPARAISON MOIS DERNIER */}
+        {catComparison.length > 0 && (
+          <G style={{ padding: isDesktop ? 18 : 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>📊 Évolution vs mois dernier</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {catComparison.slice(0, 8).map(c => {
+                const isUp = c.diff > 0;
+                const isFlat = Math.abs(c.diff) < 1;
+                return (
+                  <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 8, background: "rgba(255,255,255,0.02)" }}>
+                    <span style={{ fontSize: 16, width: 24 }}>{c.emoji}</span>
+                    <span style={{ fontSize: 12, flex: 1, color: t1 }}>{c.name}</span>
+                    <span style={{ fontSize: 11, color: t2, minWidth: 60, textAlign: "right" }}>{fmt(c.previous)} →</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: c.color, minWidth: 60, textAlign: "right" }}>{fmt(c.current)}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: isFlat ? t2 : isUp ? red : green, minWidth: 55, textAlign: "right" }}>
+                      {isFlat ? "≈" : isUp ? "↑" : "↓"} {Math.abs(Math.round(c.diffPct))}%
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </G>
+        )}
+      </>)}
+
+      {/* CHART */}
+      {tab === "chart" && (<>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          <button onClick={() => setChartView("monthly")} style={pill(chartView === "monthly")}>Mois</button>
+          <button onClick={() => setChartView("yearly")} style={pill(chartView === "yearly")}>Année</button>
+        </div>
+        <G glow={vio} style={{ padding: isDesktop ? "18px 12px 12px" : "14px 8px 8px", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, paddingLeft: 8 }}>📈 Patrimoine</div>
+          <ResponsiveContainer width="100%" height={isDesktop ? 240 : 180}>
+            <AreaChart data={patriData}>
+              <defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={vio} stopOpacity={0.3} /><stop offset="100%" stopColor={vio} stopOpacity={0} /></linearGradient></defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} width={50} />
+              <Tooltip contentStyle={tipStyle} />
+              <Area type="monotone" dataKey="patrimoine" stroke={vio} fill="url(#pg)" strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </G>
+        <G style={{ padding: isDesktop ? "18px 12px 12px" : "14px 8px 8px", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, paddingLeft: 8 }}>Revenus vs Dépenses</div>
+          <ResponsiveContainer width="100%" height={isDesktop ? 240 : 180}>
+            <BarChart data={chartData} barGap={2}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} width={50} />
+              <Tooltip contentStyle={tipStyle} />
+              <Bar dataKey="revenus" fill={green} radius={[4,4,0,0]} />
+              <Bar dataKey="depenses" fill={red} radius={[4,4,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </G>
+        <G style={{ padding: isDesktop ? "18px 12px 12px" : "14px 8px 8px" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, paddingLeft: 8 }}>Net mensuel</div>
+          <ResponsiveContainer width="100%" height={isDesktop ? 220 : 170}>
+            <AreaChart data={chartData}>
+              <defs><linearGradient id="ng" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={green} stopOpacity={0.25} /><stop offset="100%" stopColor={green} stopOpacity={0} /></linearGradient></defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} width={50} />
+              <Tooltip contentStyle={tipStyle} />
+              <Area type="monotone" dataKey="net" stroke={green} fill="url(#ng)" strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </G>
+      </>)}
+
+      {/* HEATMAP */}
+      {tab === "heatmap" && (<>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>📅 Heatmap des dépenses</div>
+          <div style={{ display: "flex", gap: 5 }}>
+            {availableYears.map(y => (
+              <button key={y} onClick={() => { setHeatmapYear(y); setHeatmapSelectedDate(null); }} style={pill(heatmapYear === y)}>{y}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "repeat(4, 1fr)" : "1fr 1fr", gap: 10, marginBottom: 12 }}>
+          <G style={{ padding: "12px 14px" }}>
+            <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Total {heatmapYear}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: red }}>{fmt(heatmapStats.total)}</div>
+          </G>
+          <G style={{ padding: "12px 14px" }}>
+            <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Jours actifs</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: vio }}>{heatmapStats.daysWithExp}j</div>
+          </G>
+          <G style={{ padding: "12px 14px" }}>
+            <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Moy / jour actif</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: t1 }}>{fmt(heatmapStats.avgPerDay)}</div>
+          </G>
+          <G style={{ padding: "12px 14px", cursor: heatmapStats.maxDay ? "pointer" : "default" }} onClick={() => heatmapStats.maxDay && setHeatmapSelectedDate(heatmapStats.maxDay)}>
+            <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Pire journée</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#fbbf24" }}>
+              {heatmapStats.maxDay ? `${new Date(heatmapStats.maxDay).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} • ${fmt(heatmapStats.maxDayAmount)}` : "—"}
+            </div>
+          </G>
+        </div>
+
+        <G style={{ padding: 16, marginBottom: 12 }}>
+          <Heatmap allTx={allTx} year={heatmapYear} onCellClick={setHeatmapSelectedDate} selectedDate={heatmapSelectedDate} t2={t2} red={red} />
+        </G>
+
+        {heatmapSelectedDate && (
+          <G style={{ padding: 14 }} glow={vio}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {new Date(heatmapSelectedDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+              </div>
+              <button onClick={() => setHeatmapSelectedDate(null)} style={{ background: "none", border: "none", color: t2, cursor: "pointer", fontSize: 14 }}>✕</button>
+            </div>
+            {selectedDayTx.length === 0 && <div style={{ fontSize: 12, color: t2, textAlign: "center", padding: 12 }}>Aucune transaction ce jour-là</div>}
+            {selectedDayTx.map(tx => <TxRow key={tx.id} tx={tx} />)}
+          </G>
+        )}
+
+        {!heatmapSelectedDate && (
+          <div style={{ fontSize: 11, color: t2, textAlign: "center", marginTop: 10 }}>
+            💡 Clique sur un carré pour voir le détail de ce jour
+          </div>
+        )}
+      </>)}
+
+      {/* SUBS */}
+      {tab === "subs" && (<>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div><div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>Abonnements</div><div style={{ fontSize: 12, color: t2 }}>{fmt(totalSubsMonth)}/mois</div></div>
+          <button onClick={() => setModal("sub")} style={{ background: vio + "20", color: vio, border: `1px solid ${vio}40`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
+        </div>
+        {subs.length === 0 && <G style={{ padding: 28, textAlign: "center" }}><span style={{ color: t2 }}>Aucun abonnement</span></G>}
+        <div style={{ display: isDesktop ? "grid" : "block", gridTemplateColumns: isDesktop ? "1fr 1fr" : undefined, gap: isDesktop ? 8 : 0 }}>
+          {subs.map(s => { const p = PLATFORMS.find(pl => pl.id === s.platform); return (
+            <G key={s.id} style={{ padding: "12px 14px", marginBottom: isDesktop ? 0 : 5, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: s.active ? 1 : 0.4 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontSize: 12, fontWeight: 500 }}>🔄 {s.name}</span><span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: p?.color + "10", color: p?.color }}>{p?.name}</span></div>
+                <div style={{ fontSize: 10, color: t2 }}>Le {s.day}/mois</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontWeight: 600, fontSize: 13, color: red }}>-{fmt2(s.amount)}</span>
+                <button onClick={() => toggleSub(s.id)} style={{ width: 36, height: 22, borderRadius: 11, border: "none", cursor: "pointer", position: "relative", background: s.active ? green : "rgba(255,255,255,0.06)" }}><div style={{ width: 16, height: 16, borderRadius: 8, background: "#fff", position: "absolute", top: 3, left: s.active ? 17 : 3, transition: "left 0.2s" }} /></button>
+                {confirmDelSub === s.id ? (
+                  <div style={{ display: "flex", gap: 3 }}>
+                    <button onClick={() => delSub(s.id)} style={{ background: red, border: "none", borderRadius: 5, color: "#fff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Oui</button>
+                    <button onClick={() => setConfirmDelSub(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 5, color: t2, fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Non</button>
+                  </div>
+                ) : <button onClick={() => setConfirmDelSub(s.id)} style={{ background: "none", border: "none", color: t2 + "30", cursor: "pointer", fontSize: 13 }}>🗑</button>}
+              </div>
+            </G>
+          ); })}
+        </div>
+      </>)}
+
+      {/* REFUNDS */}
+      {tab === "refunds" && (<>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div><div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>💸 Remboursements</div><div style={{ fontSize: 12, color: t2 }}>{pendingRefunds.length} en attente — {fmt(totalPendingRefunds)}</div></div>
+          <button onClick={() => setModal("refund")} style={{ background: "#fbbf24" + "20", color: "#fbbf24", border: `1px solid #fbbf2440`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
+        </div>
+        {refunds.length === 0 && <G style={{ padding: 28, textAlign: "center" }}><span style={{ color: t2 }}>Aucun remboursement en attente 🎉</span></G>}
+        <div style={{ display: isDesktop ? "grid" : "block", gridTemplateColumns: isDesktop ? "1fr 1fr" : undefined, gap: isDesktop ? 8 : 0 }}>
+          {refunds.map(r => (
+            <G key={r.id} style={{ padding: "12px 14px", marginBottom: isDesktop ? 0 : 5, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: r.resolved ? 0.4 : 1 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ fontSize: 12, fontWeight: 500 }}>{r.resolved ? "✅" : "⏳"} {r.label}</span>
+                </div>
+                <div style={{ fontSize: 10, color: t2 }}>{new Date(r.date).toLocaleDateString("fr-FR")}{r.resolved_date ? ` → remboursé le ${new Date(r.resolved_date).toLocaleDateString("fr-FR")}` : ""}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontWeight: 600, fontSize: 13, color: r.resolved ? green : "#fbbf24" }}>{fmt2(r.amount)}</span>
+                {!r.resolved && <button onClick={() => resolveRefund(r.id)} style={{ background: green + "20", color: green, border: `1px solid ${green}40`, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: ff, fontSize: 10, fontWeight: 600 }}>✓ Reçu</button>}
+                <button onClick={() => delRefund(r.id)} style={{ background: "none", border: "none", color: t2 + "30", cursor: "pointer", fontSize: 13 }}>🗑</button>
+              </div>
+            </G>
+          ))}
+        </div>
+      </>)}
+    </>
+  );
+
+  // ============== RENDER ROOT ==============
+  if (isDesktop) {
+    return (
+      <div style={{ background: bg, color: t1, fontFamily: ff, minHeight: "100vh", fontSize: 13, display: "flex" }}>
+        {/* SIDEBAR DESKTOP */}
+        <div style={{ width: 240, minHeight: "100vh", background: "rgba(255,255,255,0.015)", borderRight: "1px solid rgba(255,255,255,0.05)", padding: "24px 16px", display: "flex", flexDirection: "column", position: "sticky", top: 0, alignSelf: "flex-start", height: "100vh", boxSizing: "border-box" }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: vioBright, textShadow: `0 0 24px ${vio}50`, marginBottom: 32, paddingLeft: 4 }}>⚡ Tracker</div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+            {navItems.map(([k, ico, l]) => {
+              const active = tab === k;
+              return (
+                <button key={k} onClick={() => setTab(k)} style={{
+                  background: active ? vio + "15" : "transparent",
+                  border: `1px solid ${active ? vio + "35" : "transparent"}`,
+                  color: active ? vioBright : t2,
+                  fontSize: 13, fontWeight: active ? 600 : 500,
+                  padding: "10px 14px", borderRadius: 10, cursor: "pointer", fontFamily: ff,
+                  textAlign: "left", display: "flex", alignItems: "center", gap: 10,
+                  boxShadow: active ? `0 0 16px ${vio}15` : "none", transition: "all 0.15s",
+                }}>
+                  <span style={{ fontSize: 15 }}>{ico}</span>{l}
+                </button>
+              );
+            })}
+          </div>
+
+          {streak > 0 && (
+            <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 10, background: vio + "08", border: `1px solid ${vio}20`, textAlign: "center" }}>
+              <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1.2 }}>🔥 Streak</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: vio }}>{streak} jours</div>
+            </div>
+          )}
+
+          {/* Patrimoine + objectif en bas de la sidebar */}
+          <G glow={vio} style={{ padding: 14 }}>
+            <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>Patrimoine</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: totalEur < 0 ? red : t1, marginBottom: 10, lineHeight: 1.1 }}>{fmtSigned(totalEur)}</div>
+            <div style={{ fontSize: 9, color: t2, marginBottom: 4 }}>🎯 Objectif {fmt(goal)}</div>
+            <div style={{ height: 8, borderRadius: 4, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${goalPct}%`, background: `linear-gradient(90deg, ${purple}, ${vioBright}, #e879f9)`, boxShadow: `0 0 12px ${vio}60`, transition: "width 0.8s" }} />
+            </div>
+            <div style={{ textAlign: "right", marginTop: 4, fontSize: 11, fontWeight: 600, color: vioBright }}>{goalPct.toFixed(1)}%</div>
+          </G>
+
+          <button onClick={exportCSV} style={{ marginTop: 10, padding: "8px 12px", borderRadius: 10, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", color: t2, fontSize: 11, fontFamily: ff, cursor: "pointer" }}>↓ Export CSV</button>
+        </div>
+
+        {/* CONTENU PRINCIPAL DESKTOP */}
+        <div style={{ flex: 1, padding: "28px 32px", maxWidth: 1280, margin: "0 auto", boxSizing: "border-box", width: "100%" }}>
+
+          {/* PLATEFORMES en grille 6 cols */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10, marginBottom: 24 }}>
+            {PLATFORMS.map(p => (
+              <G key={p.id} glow={editBal === p.id ? p.color : null}
+                onClick={() => { if (editBal === p.id) return; setEditBal(p.id); setEditBalVal(String(initialBalances[p.id] || 0)); }}
+                style={{ padding: "14px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: p.color + "18", color: p.color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13 }}>{p.icon}</div>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: t1 }}>{p.name}</span>
+                </div>
+                {editBal === p.id ? (
+                  <input type="number" value={editBalVal} onChange={e => setEditBalVal(e.target.value)} autoFocus style={{ ...inputStyle, fontSize: 13, padding: "6px 10px" }}
+                    onKeyDown={e => { if (e.key === "Enter") saveBal(p.id); if (e.key === "Escape") setEditBal(null); }} onBlur={() => saveBal(p.id)} />
+                ) : <div style={{ fontWeight: 700, fontSize: 18, color: balances[p.id] < 0 ? red : t1 }}>{fmtSigned(balances[p.id])}</div>}
+              </G>
+            ))}
+          </div>
+
+          {renderTab()}
+        </div>
+
+        {/* BOTTOM BUTTONS */}
+        <div style={{ position: "fixed", bottom: 20, right: 32, display: "flex", gap: 8, zIndex: 50 }}>
+          {[["expense","− Dépense",red],["income","+ Revenu",green],["transfer","↔ Transfert",purple]].map(([type,label,color]) => (
+            <button key={type} onClick={() => { uf("type", type); setEditTx(null); setModal("tx"); }}
+              style={{ background: color + "18", color, border: `1px solid ${color}35`, borderRadius: 12, padding: "12px 18px", cursor: "pointer", fontSize: 13, fontFamily: ff, fontWeight: 600, boxShadow: `0 0 20px ${color}20`, backdropFilter: "blur(10px)" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {renderModals()}
+      </div>
+    );
+  }
+
+  // ============== MOBILE RENDER (inchangé) ==============
   return (
     <div style={{ background: bg, color: t1, fontFamily: ff, minHeight: "100vh", fontSize: 13, paddingBottom: 90, maxWidth: 900, margin: "0 auto" }}>
 
@@ -631,242 +1257,7 @@ export default function App() {
       </div>
 
       <div style={{ padding: "0 16px" }}>
-
-        {/* HOME */}
-        {tab === "home" && (<>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, marginBottom: 8 }}>
-            <button onClick={() => shiftMonth(-1)} style={{ background: "none", border: "none", color: t2, fontSize: 22, cursor: "pointer", fontFamily: ff }}>‹</button>
-            <span style={{ fontSize: 17, fontWeight: 600 }}>{mlabel(month)}</span>
-            <button onClick={() => shiftMonth(1)} style={{ background: "none", border: "none", color: t2, fontSize: 22, cursor: "pointer", fontFamily: ff }}>›</button>
-          </div>
-
-          {insight && <div style={{ padding: "7px 12px", marginBottom: 8, borderRadius: 10, background: insight.color + "10", border: `1px solid ${insight.color}20`, fontSize: 12, color: insight.color, fontWeight: 500, textAlign: "center" }}>{insight.text}</div>}
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-            <G glow={green} style={{ padding: "14px" }}>
-              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Rentrées</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: green }}>+{fmt(stats.inc)}</div>
-            </G>
-            <G glow={red} style={{ padding: "14px" }}>
-              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Dépenses</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: red }}>-{fmt(stats.exp)}</div>
-            </G>
-          </div>
-          <G glow={stats.net >= 0 ? green : red} style={{ padding: "10px 14px", marginBottom: 8, textAlign: "center" }}>
-            <span style={{ fontSize: 10, color: t2 }}>NET </span>
-            <span style={{ fontSize: 24, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : "-"}{fmt(stats.net)}</span>
-          </G>
-
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            {totalSubsMonth > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }}><span style={{ fontSize: 10, color: t2 }}>📱 Abos : </span><span style={{ fontSize: 12, fontWeight: 600, color: vio }}>{fmt(totalSubsMonth)}/mois</span></G>}
-            {eleaTotal > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }}><span style={{ fontSize: 10, color: t2 }}>💕 Elea : </span><span style={{ fontSize: 12, fontWeight: 600, color: "#f472b6" }}>{fmt(eleaTotal)}</span></G>}
-            {totalPendingRefunds > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }} onClick={() => setTab("refunds")}><span style={{ fontSize: 10, color: t2 }}>💸 Remb : </span><span style={{ fontSize: 12, fontWeight: 600, color: "#fbbf24" }}>{fmt(totalPendingRefunds)}</span></G>}
-          </div>
-
-          <div style={{ display: "flex", gap: 5, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <button onClick={() => setShowSearch(!showSearch)} style={{ ...pill(showSearch), padding: "5px 10px" }}>🔍</button>
-            <button onClick={() => setSortBy(sortBy === "date" ? "amount" : "date")} style={{ ...pill(false), padding: "5px 10px", fontSize: 11 }}>{sortBy === "date" ? "📅" : "💰"}</button>
-            <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "5px 10px", fontSize: 11 }}>💕</button>
-            <div style={{ display: "flex", gap: 3, overflowX: "auto", scrollbarWidth: "none" }}>
-              <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "5px 8px", fontSize: 10 }}>Tout</button>
-              {PLATFORMS.map(p => <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "5px 8px", fontSize: 10 }}>{p.icon}</button>)}
-            </div>
-          </div>
-          {showSearch && <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." autoFocus style={{ ...inputStyle, marginBottom: 6, fontSize: 13 }} />}
-
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Transactions</div>
-          {mTx.length === 0 && <G style={{ padding: 24, textAlign: "center" }}><span style={{ color: t2 }}>Aucune transaction</span></G>}
-          {visTx.map(tx => <TxRow key={tx.id} tx={tx} />)}
-          {mTx.length > 6 && <button onClick={() => setShowAllTx(!showAllTx)} style={{ ...pill(false), width: "100%", marginTop: 4, textAlign: "center", display: "block" }}>{showAllTx ? "Voir moins" : `Tout voir (${mTx.length})`}</button>}
-        </>)}
-
-        {/* DETAILS */}
-        {tab === "details" && (<>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 20, marginBottom: 10 }}>
-            <button onClick={() => shiftMonth(-1)} style={{ background: "none", border: "none", color: t2, fontSize: 22, cursor: "pointer", fontFamily: ff }}>‹</button>
-            <span style={{ fontSize: 17, fontWeight: 600 }}>{mlabel(month)}</span>
-            <button onClick={() => shiftMonth(1)} style={{ background: "none", border: "none", color: t2, fontSize: 22, cursor: "pointer", fontFamily: ff }}>›</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-            <G style={{ padding: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: red }}>Dépenses</div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                <Donut data={donutExp} />
-                {donutExp.map(d => <div key={d.label} style={{ display: "flex", justifyContent: "space-between", width: "100%" }}><div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 7, height: 7, borderRadius: 2, background: d.color }} /><span style={{ fontSize: 10, color: t2 }}>{d.label}</span></div><span style={{ fontSize: 10, fontWeight: 600, color: t2 }}>{fmt(d.value)}</span></div>)}
-                {donutExp.length === 0 && <span style={{ fontSize: 10, color: t2 }}>—</span>}
-              </div>
-            </G>
-            <G style={{ padding: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: green }}>Revenus</div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                <Donut data={donutInc} />
-                {donutInc.map(d => <div key={d.label} style={{ display: "flex", justifyContent: "space-between", width: "100%" }}><div style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 7, height: 7, borderRadius: 2, background: d.color }} /><span style={{ fontSize: 10, color: t2 }}>{d.label}</span></div><span style={{ fontSize: 10, fontWeight: 600, color: t2 }}>{fmt(d.value)}</span></div>)}
-                {donutInc.length === 0 && <span style={{ fontSize: 10, color: t2 }}>—</span>}
-              </div>
-            </G>
-          </div>
-          <G style={{ padding: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Top dépenses</div>
-            {[...allTx.filter(tx => mkey(tx.date) === month && tx.type === "expense")].sort((a, b) => b.amount - a.amount).slice(0, 5).map((tx, i) => {
-              const cat = EXP_CATS.find(c => c.id === tx.category);
-              return <div key={tx.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: i < 4 ? "1px solid rgba(255,255,255,0.03)" : "none" }}><div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: t2, width: 18 }}>#{i+1}</span><span style={{ fontSize: 13 }}>{cat?.emoji || "📦"}</span><span style={{ fontSize: 12 }}>{tx.note || cat?.name}</span></div><span style={{ fontSize: 12, fontWeight: 600, color: red }}>{fmt2(tx.amount)}</span></div>;
-            })}
-          </G>
-        </>)}
-
-        {/* CHART */}
-        {tab === "chart" && (<>
-          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-            <button onClick={() => setChartView("monthly")} style={pill(chartView === "monthly")}>Mois</button>
-            <button onClick={() => setChartView("yearly")} style={pill(chartView === "yearly")}>Année</button>
-          </div>
-          <G style={{ padding: "14px 8px 8px", marginBottom: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, paddingLeft: 8 }}>📈 Patrimoine</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={patriData}>
-                <defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={vio} stopOpacity={0.3} /><stop offset="100%" stopColor={vio} stopOpacity={0} /></linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} width={50} />
-                <Tooltip contentStyle={tipStyle} />
-                <Area type="monotone" dataKey="patrimoine" stroke={vio} fill="url(#pg)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </G>
-          <G style={{ padding: "14px 8px 8px", marginBottom: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, paddingLeft: 8 }}>Revenus vs Dépenses</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={chartData} barGap={2}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} width={50} />
-                <Tooltip contentStyle={tipStyle} />
-                <Bar dataKey="revenus" fill={green} radius={[4,4,0,0]} />
-                <Bar dataKey="depenses" fill={red} radius={[4,4,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </G>
-          <G style={{ padding: "14px 8px 8px" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, paddingLeft: 8 }}>Net mensuel</div>
-            <ResponsiveContainer width="100%" height={170}>
-              <AreaChart data={chartData}>
-                <defs><linearGradient id="ng" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={green} stopOpacity={0.25} /><stop offset="100%" stopColor={green} stopOpacity={0} /></linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} width={50} />
-                <Tooltip contentStyle={tipStyle} />
-                <Area type="monotone" dataKey="net" stroke={green} fill="url(#ng)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </G>
-        </>)}
-
-        {/* HEATMAP */}
-        {tab === "heatmap" && (<>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>📅 Heatmap des dépenses</div>
-            <div style={{ display: "flex", gap: 5 }}>
-              {availableYears.map(y => (
-                <button key={y} onClick={() => { setHeatmapYear(y); setHeatmapSelectedDate(null); }} style={pill(heatmapYear === y)}>{y}</button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-            <G style={{ padding: "10px 12px" }}>
-              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Total {heatmapYear}</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: red }}>{fmt(heatmapStats.total)}</div>
-            </G>
-            <G style={{ padding: "10px 12px" }}>
-              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Jours actifs</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: vio }}>{heatmapStats.daysWithExp}j</div>
-            </G>
-            <G style={{ padding: "10px 12px" }}>
-              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Moy / jour actif</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: t1 }}>{fmt(heatmapStats.avgPerDay)}</div>
-            </G>
-            <G style={{ padding: "10px 12px", cursor: heatmapStats.maxDay ? "pointer" : "default" }} onClick={() => heatmapStats.maxDay && setHeatmapSelectedDate(heatmapStats.maxDay)}>
-              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Pire journée</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#fbbf24" }}>
-                {heatmapStats.maxDay ? `${new Date(heatmapStats.maxDay).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} • ${fmt(heatmapStats.maxDayAmount)}` : "—"}
-              </div>
-            </G>
-          </div>
-
-          <G style={{ padding: 14, marginBottom: 10 }}>
-            <Heatmap allTx={allTx} year={heatmapYear} onCellClick={setHeatmapSelectedDate} selectedDate={heatmapSelectedDate} t2={t2} red={red} />
-          </G>
-
-          {heatmapSelectedDate && (
-            <G style={{ padding: 14 }} glow={vio}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {new Date(heatmapSelectedDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
-                </div>
-                <button onClick={() => setHeatmapSelectedDate(null)} style={{ background: "none", border: "none", color: t2, cursor: "pointer", fontSize: 14 }}>✕</button>
-              </div>
-              {selectedDayTx.length === 0 && <div style={{ fontSize: 12, color: t2, textAlign: "center", padding: 12 }}>Aucune transaction ce jour-là</div>}
-              {selectedDayTx.map(tx => <TxRow key={tx.id} tx={tx} />)}
-            </G>
-          )}
-
-          {!heatmapSelectedDate && (
-            <div style={{ fontSize: 11, color: t2, textAlign: "center", marginTop: 10 }}>
-              💡 Clique sur un carré pour voir le détail de ce jour
-            </div>
-          )}
-        </>)}
-
-        {/* SUBS */}
-        {tab === "subs" && (<>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div><div style={{ fontSize: 15, fontWeight: 600 }}>Abonnements</div><div style={{ fontSize: 12, color: t2 }}>{fmt(totalSubsMonth)}/mois</div></div>
-            <button onClick={() => setModal("sub")} style={{ background: vio + "20", color: vio, border: `1px solid ${vio}40`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
-          </div>
-          {subs.length === 0 && <G style={{ padding: 28, textAlign: "center" }}><span style={{ color: t2 }}>Aucun abonnement</span></G>}
-          {subs.map(s => { const p = PLATFORMS.find(pl => pl.id === s.platform); return (
-            <G key={s.id} style={{ padding: "11px 13px", marginBottom: 5, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: s.active ? 1 : 0.4 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontSize: 12, fontWeight: 500 }}>🔄 {s.name}</span><span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: p?.color + "10", color: p?.color }}>{p?.name}</span></div>
-                <div style={{ fontSize: 10, color: t2 }}>Le {s.day}/mois</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontWeight: 600, fontSize: 13, color: red }}>-{fmt2(s.amount)}</span>
-                <button onClick={() => toggleSub(s.id)} style={{ width: 36, height: 22, borderRadius: 11, border: "none", cursor: "pointer", position: "relative", background: s.active ? green : "rgba(255,255,255,0.06)" }}><div style={{ width: 16, height: 16, borderRadius: 8, background: "#fff", position: "absolute", top: 3, left: s.active ? 17 : 3, transition: "left 0.2s" }} /></button>
-                {confirmDelSub === s.id ? (
-                  <div style={{ display: "flex", gap: 3 }}>
-                    <button onClick={() => delSub(s.id)} style={{ background: red, border: "none", borderRadius: 5, color: "#fff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Oui</button>
-                    <button onClick={() => setConfirmDelSub(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 5, color: t2, fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Non</button>
-                  </div>
-                ) : <button onClick={() => setConfirmDelSub(s.id)} style={{ background: "none", border: "none", color: t2 + "30", cursor: "pointer", fontSize: 13 }}>🗑</button>}
-              </div>
-            </G>
-          ); })}
-        </>)}
-
-        {/* REFUNDS */}
-        {tab === "refunds" && (<>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div><div style={{ fontSize: 15, fontWeight: 600 }}>💸 Remboursements</div><div style={{ fontSize: 12, color: t2 }}>{pendingRefunds.length} en attente — {fmt(totalPendingRefunds)}</div></div>
-            <button onClick={() => setModal("refund")} style={{ background: "#fbbf24" + "20", color: "#fbbf24", border: `1px solid #fbbf2440`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
-          </div>
-          {refunds.length === 0 && <G style={{ padding: 28, textAlign: "center" }}><span style={{ color: t2 }}>Aucun remboursement en attente 🎉</span></G>}
-          {refunds.map(r => (
-            <G key={r.id} style={{ padding: "11px 13px", marginBottom: 5, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: r.resolved ? 0.4 : 1 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <span style={{ fontSize: 12, fontWeight: 500 }}>{r.resolved ? "✅" : "⏳"} {r.label}</span>
-                </div>
-                <div style={{ fontSize: 10, color: t2 }}>{new Date(r.date).toLocaleDateString("fr-FR")}{r.resolved_date ? ` → remboursé le ${new Date(r.resolved_date).toLocaleDateString("fr-FR")}` : ""}</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontWeight: 600, fontSize: 13, color: r.resolved ? green : "#fbbf24" }}>{fmt2(r.amount)}</span>
-                {!r.resolved && <button onClick={() => resolveRefund(r.id)} style={{ background: green + "20", color: green, border: `1px solid ${green}40`, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: ff, fontSize: 10, fontWeight: 600 }}>✓ Reçu</button>}
-                <button onClick={() => delRefund(r.id)} style={{ background: "none", border: "none", color: t2 + "30", cursor: "pointer", fontSize: 13 }}>🗑</button>
-              </div>
-            </G>
-          ))}
-        </>)}
+        {renderTab()}
       </div>
 
       {/* BOTTOM BUTTONS */}
@@ -879,136 +1270,144 @@ export default function App() {
         ))}
       </div>
 
-      {/* MODAL TX */}
-      {modal === "tx" && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => { setModal(null); setEditTx(null); }}>
-          <div style={{ background: "#0a0a10", borderRadius: "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
-            <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />
+      {renderModals()}
+    </div>
+  );
 
-            {!editTx && lastTx && (
-              <button onClick={redoLast} style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: vio + "08", border: `1px solid ${vio}20`, cursor: "pointer", fontFamily: ff, fontSize: 12, color: vio, marginBottom: 12, textAlign: "left", display: "flex", justifyContent: "space-between" }}>
-                <span>🔁 {lastTx.note || [...EXP_CATS,...INC_CATS].find(c => c.id === (lastTx.category || lastTx.inc_category))?.name} — {fmt2(lastTx.amount)}</span><span style={{ opacity: 0.5 }}>→</span>
-              </button>
-            )}
+  // ============== MODALS (partagés) ==============
+  function renderModals() {
+    return (
+      <>
+        {/* MODAL TX */}
+        {modal === "tx" && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => { setModal(null); setEditTx(null); }}>
+            <div style={{ background: "#0a0a10", borderRadius: isDesktop ? 18 : "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: isDesktop ? "1px solid rgba(255,255,255,0.07)" : "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+              {!isDesktop && <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />}
 
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, textAlign: "center" }}>
-              {editTx ? "✏️ Modifier" : f.type === "expense" ? "➖ Dépense" : f.type === "income" ? "➕ Revenu" : "↔ Transfert"}
-            </div>
+              {!editTx && lastTx && (
+                <button onClick={redoLast} style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: vio + "08", border: `1px solid ${vio}20`, cursor: "pointer", fontFamily: ff, fontSize: 12, color: vio, marginBottom: 12, textAlign: "left", display: "flex", justifyContent: "space-between" }}>
+                  <span>🔁 {lastTx.note || [...EXP_CATS,...INC_CATS].find(c => c.id === (lastTx.category || lastTx.inc_category))?.name} — {fmt2(lastTx.amount)}</span><span style={{ opacity: 0.5 }}>→</span>
+                </button>
+              )}
 
-            {/* NUMPAD */}
-            <NumPad
-              value={f.amount}
-              onChange={(v) => uf("amount", v)}
-              color={f.type === "expense" ? red : f.type === "income" ? green : purple}
-            />
-
-            <div style={{ marginTop: 12, marginBottom: 10 }}>
-              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>{f.type === "transfer" ? "De" : "Plateforme"}</div>
-              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                {PLATFORMS.map(p => (
-                  <button key={p.id} onClick={() => uf("platform", p.id)}
-                    style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${f.platform === p.id ? p.color + "50" : "rgba(255,255,255,0.05)"}`, background: f.platform === p.id ? p.color + "12" : "transparent", color: f.platform === p.id ? p.color : t2, fontSize: 12, cursor: "pointer", fontFamily: ff, fontWeight: 600 }}>
-                    {p.icon} {p.name}
-                  </button>
-                ))}
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, textAlign: "center" }}>
+                {editTx ? "✏️ Modifier" : f.type === "expense" ? "➖ Dépense" : f.type === "income" ? "➕ Revenu" : "↔ Transfert"}
               </div>
-            </div>
 
-            {f.type === "transfer" && (<>
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Vers</div>
+              <NumPad
+                value={f.amount}
+                onChange={(v) => uf("amount", v)}
+                color={f.type === "expense" ? red : f.type === "income" ? green : purple}
+              />
+
+              <div style={{ marginTop: 12, marginBottom: 10 }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>{f.type === "transfer" ? "De" : "Plateforme"}</div>
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                  {PLATFORMS.filter(p => p.id !== f.platform).map(p => (
-                    <button key={p.id} onClick={() => uf("to", p.id)}
-                      style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${f.to === p.id ? p.color + "50" : "rgba(255,255,255,0.05)"}`, background: f.to === p.id ? p.color + "12" : "transparent", color: f.to === p.id ? p.color : t2, fontSize: 12, cursor: "pointer", fontFamily: ff, fontWeight: 600 }}>
+                  {PLATFORMS.map(p => (
+                    <button key={p.id} onClick={() => uf("platform", p.id)}
+                      style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${f.platform === p.id ? p.color + "50" : "rgba(255,255,255,0.05)"}`, background: f.platform === p.id ? p.color + "12" : "transparent", color: f.platform === p.id ? p.color : t2, fontSize: 12, cursor: "pointer", fontFamily: ff, fontWeight: 600 }}>
                       {p.icon} {p.name}
                     </button>
                   ))}
                 </div>
               </div>
-              <div style={{ marginBottom: 10 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Frais (optionnel)</div><input type="number" value={f.fees} onChange={e => uf("fees", e.target.value)} placeholder="0" style={inputStyle} /></div>
-            </>)}
 
-            {f.type === "expense" && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Catégorie</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5 }}>
-                  {EXP_CATS.map(c => (
-                    <button key={c.id} onClick={() => uf("category", c.id)}
-                      style={{ padding: "8px 3px", borderRadius: 10, border: `1px solid ${f.category === c.id ? c.color + "50" : "rgba(255,255,255,0.05)"}`, background: f.category === c.id ? c.color + "12" : "transparent", color: f.category === c.id ? c.color : t2, fontSize: 10, cursor: "pointer", fontFamily: ff, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                      <span style={{ fontSize: 17 }}>{c.emoji}</span>{c.name}
-                    </button>
-                  ))}
+              {f.type === "transfer" && (<>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Vers</div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {PLATFORMS.filter(p => p.id !== f.platform).map(p => (
+                      <button key={p.id} onClick={() => uf("to", p.id)}
+                        style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${f.to === p.id ? p.color + "50" : "rgba(255,255,255,0.05)"}`, background: f.to === p.id ? p.color + "12" : "transparent", color: f.to === p.id ? p.color : t2, fontSize: 12, cursor: "pointer", fontFamily: ff, fontWeight: 600 }}>
+                        {p.icon} {p.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginBottom: 10 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Frais (optionnel)</div><input type="number" value={f.fees} onChange={e => uf("fees", e.target.value)} placeholder="0" style={inputStyle} /></div>
+              </>)}
+
+              {f.type === "expense" && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Catégorie</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5 }}>
+                    {EXP_CATS.map(c => (
+                      <button key={c.id} onClick={() => uf("category", c.id)}
+                        style={{ padding: "8px 3px", borderRadius: 10, border: `1px solid ${f.category === c.id ? c.color + "50" : "rgba(255,255,255,0.05)"}`, background: f.category === c.id ? c.color + "12" : "transparent", color: f.category === c.id ? c.color : t2, fontSize: 10, cursor: "pointer", fontFamily: ff, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                        <span style={{ fontSize: 17 }}>{c.emoji}</span>{c.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {f.type === "income" && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Source</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5 }}>
+                    {INC_CATS.map(c => (
+                      <button key={c.id} onClick={() => uf("incCategory", c.id)}
+                        style={{ padding: "8px 3px", borderRadius: 10, border: `1px solid ${f.incCategory === c.id ? c.color + "50" : "rgba(255,255,255,0.05)"}`, background: f.incCategory === c.id ? c.color + "12" : "transparent", color: f.incCategory === c.id ? c.color : t2, fontSize: 10, cursor: "pointer", fontFamily: ff, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                        <span style={{ fontSize: 17 }}>{c.emoji}</span>{c.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Date</div><input type="date" value={f.date} onChange={e => uf("date", e.target.value)} style={inputStyle} /></div>
+                <div style={{ flex: 2 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Note</div><input value={f.note} onChange={e => uf("note", e.target.value)} placeholder="Optionnel... (écris 'elea' pour tracker)" style={inputStyle} /></div>
+              </div>
+
+              <button onClick={submit} style={{
+                width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff",
+                background: `linear-gradient(135deg, ${f.type === "expense" ? red : f.type === "income" ? green : purple}, ${f.type === "expense" ? "#dc2626" : f.type === "income" ? "#059669" : "#7c3aed"})`,
+              }}>
+                {editTx ? "Sauvegarder" : f.type === "transfer" ? "Transférer" : "Ajouter"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL SUB */}
+        {modal === "sub" && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
+            <div style={{ background: "#0a0a10", borderRadius: isDesktop ? 18 : "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: isDesktop ? "1px solid rgba(255,255,255,0.07)" : "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+              {!isDesktop && <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />}
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, textAlign: "center" }}>🔄 Nouvel abonnement</div>
+              <div style={{ marginBottom: 10 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Nom</div><input value={sf.name} onChange={e => usf("name", e.target.value)} placeholder="Netflix, Spotify..." autoFocus style={inputStyle} /></div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>€/mois</div><input type="number" value={sf.amount} onChange={e => usf("amount", e.target.value)} placeholder="9.99" style={inputStyle} /></div>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Jour</div><input type="number" min="1" max="31" value={sf.day} onChange={e => usf("day", e.target.value)} style={inputStyle} /></div>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Plateforme</div>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  {PLATFORMS.map(p => (<button key={p.id} onClick={() => usf("platform", p.id)} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${sf.platform === p.id ? p.color + "50" : "rgba(255,255,255,0.05)"}`, background: sf.platform === p.id ? p.color + "12" : "transparent", color: sf.platform === p.id ? p.color : t2, fontSize: 12, cursor: "pointer", fontFamily: ff, fontWeight: 600 }}>{p.icon} {p.name}</button>))}
                 </div>
               </div>
-            )}
+              <button onClick={addSub} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff", background: `linear-gradient(135deg, ${vio}, ${purple})` }}>Ajouter</button>
+            </div>
+          </div>
+        )}
 
-            {f.type === "income" && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Source</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5 }}>
-                  {INC_CATS.map(c => (
-                    <button key={c.id} onClick={() => uf("incCategory", c.id)}
-                      style={{ padding: "8px 3px", borderRadius: 10, border: `1px solid ${f.incCategory === c.id ? c.color + "50" : "rgba(255,255,255,0.05)"}`, background: f.incCategory === c.id ? c.color + "12" : "transparent", color: f.incCategory === c.id ? c.color : t2, fontSize: 10, cursor: "pointer", fontFamily: ff, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                      <span style={{ fontSize: 17 }}>{c.emoji}</span>{c.name}
-                    </button>
-                  ))}
-                </div>
+        {/* MODAL REFUND */}
+        {modal === "refund" && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
+            <div style={{ background: "#0a0a10", borderRadius: isDesktop ? 18 : "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: isDesktop ? "1px solid rgba(255,255,255,0.07)" : "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+              {!isDesktop && <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />}
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, textAlign: "center" }}>💸 Nouveau remboursement</div>
+              <div style={{ marginBottom: 10 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Qui / Quoi</div><input value={refundForm.label} onChange={e => setRefundForm(p => ({ ...p, label: e.target.value }))} placeholder="Amazon, Jonathan..." autoFocus style={inputStyle} /></div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Montant (€)</div><input type="number" value={refundForm.amount} onChange={e => setRefundForm(p => ({ ...p, amount: e.target.value }))} placeholder="0" style={inputStyle} /></div>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Date</div><input type="date" value={refundForm.date} onChange={e => setRefundForm(p => ({ ...p, date: e.target.value }))} style={inputStyle} /></div>
               </div>
-            )}
-
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Date</div><input type="date" value={f.date} onChange={e => uf("date", e.target.value)} style={inputStyle} /></div>
-              <div style={{ flex: 2 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Note</div><input value={f.note} onChange={e => uf("note", e.target.value)} placeholder="Optionnel... (écris 'elea' pour tracker)" style={inputStyle} /></div>
+              <button onClick={addRefund} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff", background: `linear-gradient(135deg, #fbbf24, #f59e0b)` }}>Ajouter</button>
             </div>
-
-            <button onClick={submit} style={{
-              width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff",
-              background: `linear-gradient(135deg, ${f.type === "expense" ? red : f.type === "income" ? green : purple}, ${f.type === "expense" ? "#dc2626" : f.type === "income" ? "#059669" : "#7c3aed"})`,
-            }}>
-              {editTx ? "Sauvegarder" : f.type === "transfer" ? "Transférer" : "Ajouter"}
-            </button>
           </div>
-        </div>
-      )}
-
-      {/* MODAL SUB */}
-      {modal === "sub" && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
-          <div style={{ background: "#0a0a10", borderRadius: "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-            <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, textAlign: "center" }}>🔄 Nouvel abonnement</div>
-            <div style={{ marginBottom: 10 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Nom</div><input value={sf.name} onChange={e => usf("name", e.target.value)} placeholder="Netflix, Spotify..." autoFocus style={inputStyle} /></div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>€/mois</div><input type="number" value={sf.amount} onChange={e => usf("amount", e.target.value)} placeholder="9.99" style={inputStyle} /></div>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Jour</div><input type="number" min="1" max="31" value={sf.day} onChange={e => usf("day", e.target.value)} style={inputStyle} /></div>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>Plateforme</div>
-              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                {PLATFORMS.map(p => (<button key={p.id} onClick={() => usf("platform", p.id)} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${sf.platform === p.id ? p.color + "50" : "rgba(255,255,255,0.05)"}`, background: sf.platform === p.id ? p.color + "12" : "transparent", color: sf.platform === p.id ? p.color : t2, fontSize: 12, cursor: "pointer", fontFamily: ff, fontWeight: 600 }}>{p.icon} {p.name}</button>))}
-              </div>
-            </div>
-            <button onClick={addSub} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff", background: `linear-gradient(135deg, ${vio}, ${purple})` }}>Ajouter</button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL REFUND */}
-      {modal === "refund" && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
-          <div style={{ background: "#0a0a10", borderRadius: "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-            <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, textAlign: "center" }}>💸 Nouveau remboursement</div>
-            <div style={{ marginBottom: 10 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Qui / Quoi</div><input value={refundForm.label} onChange={e => setRefundForm(p => ({ ...p, label: e.target.value }))} placeholder="Amazon, Jonathan..." autoFocus style={inputStyle} /></div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Montant (€)</div><input type="number" value={refundForm.amount} onChange={e => setRefundForm(p => ({ ...p, amount: e.target.value }))} placeholder="0" style={inputStyle} /></div>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Date</div><input type="date" value={refundForm.date} onChange={e => setRefundForm(p => ({ ...p, date: e.target.value }))} style={inputStyle} /></div>
-            </div>
-            <button onClick={addRefund} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff", background: `linear-gradient(135deg, #fbbf24, #f59e0b)` }}>Ajouter</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+        )}
+      </>
+    );
+  }
 }
