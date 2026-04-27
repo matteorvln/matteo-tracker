@@ -166,7 +166,7 @@ function useIsDesktop() {
 
 function Donut({ data, size = 130 }) {
   const total = data.reduce((s, d) => s + d.value, 0);
-  if (total === 0) return <svg width={size} height={size} viewBox="0 0 130 130"><circle cx="65" cy="65" r="48" fill="none" stroke="#ffffff06" strokeWidth="14" /><text x="65" y="69" textAnchor="middle" fill="#475569" fontSize="12" fontFamily="inherit">0€</text></svg>;
+  if (total === 0) return <svg width={size} height={size} viewBox="0 0 130 130"><circle cx="65" cy="65" r="48" fill="none" stroke="#ffffff06" strokeWidth="14" /><text x="65" y="69" textAnchor="middle" fill="#e2e8f0" fontSize="12" fontFamily="inherit">0€</text></svg>;
   let cum = 0; const r = 48, c = 2 * Math.PI * r;
   return (
     <div style={{ width: size, height: size, position: "relative" }}>
@@ -819,7 +819,7 @@ export default function App() {
     setLoaded(true);
   }
 
-  const bg = "#050508", t1 = "#e2e8f0", t2 = "#475569", vio = "#a78bfa", vioBright = "#c4b5fd", green = "#34d399", red = "#f47260", purple = "#8b5cf6";
+  const bg = "#050508", t1 = "#e2e8f0", t2 = "#e2e8f0", vio = "#a78bfa", vioBright = "#c4b5fd", green = "#34d399", red = "#f47260", purple = "#8b5cf6";
   const ff = "'Outfit', sans-serif";
 
   const allTx = useMemo(() => {
