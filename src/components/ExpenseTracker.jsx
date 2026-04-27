@@ -341,7 +341,7 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, mode = "expense" 
 }
 
 // ─── SANKEY COMPONENT (flux d'argent) ───
-function SankeyDiagram({ allTx, period, t1, t2, vio, green, red, purple }) {
+function SankeyDiagram({ allTx, period, initialBalances, t1, t2, vio, green, red, purple }) {
   // Calcul des nœuds et flux selon la période
   const { nodes, links, totalIn, totalOut, totalTransfers } = useMemo(() => {
     // Filtrer les transactions selon la période
@@ -400,26 +400,44 @@ function SankeyDiagram({ allTx, period, t1, t2, vio, green, red, purple }) {
     // Colonne 1 : comptes (uniquement ceux qui ont eu de l'activité)
     const activePlatforms = PLATFORMS.filter(p =>
       accountIn[p.id] > 0 || accountOut[p.id] > 0 ||
-      Object.keys(transfers).some(k => k.startsWith(p.id + "->") || k.endsWith("->" + p.id))
+      Object.keys(transfers).some(k => k.startsWith(p.id + "->") || k.endsWith("->" + p.id)) ||
+      (initialBalances[p.id] || 0) !== 0
     );
+
+    // Calculer le SOLDE RÉEL de chaque compte (toutes périodes confondues + balance initiale)
+    // Important : on prend allTx (pas filteredTx) pour avoir le solde actuel réel
+    const realBalances = {};
+    PLATFORMS.forEach(p => { realBalances[p.id] = initialBalances[p.id] || 0; });
+    allTx.forEach(tx => {
+      if (tx.type === "income") realBalances[tx.platform] = (realBalances[tx.platform] || 0) + tx.amount;
+      else if (tx.type === "expense") realBalances[tx.platform] = (realBalances[tx.platform] || 0) - tx.amount;
+      else if (tx.type === "transfer") {
+        realBalances[tx.platform] = (realBalances[tx.platform] || 0) - tx.amount;
+        realBalances[tx.to] = (realBalances[tx.to] || 0) + tx.amount - (tx.fees || 0);
+      }
+    });
+
     activePlatforms.forEach(p => {
-      // Calculer le total entrant (revenus + transferts reçus)
+      // Calculer le total entrant (revenus + transferts reçus) sur la période
       const transfersIn = Object.entries(transfers)
         .filter(([k]) => k.endsWith("->" + p.id))
         .reduce((s, [, v]) => s + v, 0);
-      // Calculer le total sortant (dépenses + transferts envoyés)
+      // Calculer le total sortant (dépenses + transferts envoyés) sur la période
       const transfersOut = Object.entries(transfers)
         .filter(([k]) => k.startsWith(p.id + "->"))
         .reduce((s, [, v]) => s + v, 0);
-      const totalIn = (accountIn[p.id] || 0) + transfersIn;
+      const totalInForNode = (accountIn[p.id] || 0) + transfersIn;
       const totalOutForNode = (accountOut[p.id] || 0) + transfersOut;
+      // value = utilisée pour le layout (taille du nœud) — basée sur le flux total
+      // displayValue = ce qu'on affiche en texte — le solde RÉEL du compte
       nodeMap[`acc_${p.id}`] = nodes.length;
       nodes.push({
         id: `acc_${p.id}`,
         label: p.name,
         icon: p.icon,
         color: p.color,
-        value: Math.max(totalIn, totalOutForNode),
+        value: Math.max(totalInForNode, totalOutForNode, 1), // au moins 1 pour layout
+        displayValue: realBalances[p.id], // SOLDE RÉEL (peut être négatif)
         col: 1,
       });
     });
@@ -467,7 +485,7 @@ function SankeyDiagram({ allTx, period, t1, t2, vio, green, red, purple }) {
     });
 
     return { nodes, links, totalIn, totalOut, totalTransfers };
-  }, [allTx, period, red]);
+  }, [allTx, period, initialBalances, red]);
 
   const [hoveredLink, setHoveredLink] = useState(null);
   const [hoveredNode, setHoveredNode] = useState(null);
@@ -587,20 +605,62 @@ function SankeyDiagram({ allTx, period, t1, t2, vio, green, red, purple }) {
   return (
     <div style={{ position: "relative" }}>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {/* Définitions des dégradés pour les transferts (couleur source -> couleur destination) */}
+        <defs>
+          {layoutedLinks.filter(l => l.kind === "transfer").map((link, i) => (
+            <linearGradient key={`grad-${i}`} id={`transfer-grad-${i}`} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor={link.sourceNode.color} stopOpacity="0.6" />
+              <stop offset="100%" stopColor={link.targetNode.color} stopOpacity="0.6" />
+            </linearGradient>
+          ))}
+        </defs>
+
         {/* Liens (en arrière-plan) */}
         {layoutedLinks.map((link, i) => {
           const isHovered = hoveredLink === i;
+          // Pour les transferts, on utilise un dégradé source -> destination
+          // Pour les revenus et dépenses, on garde la couleur source
+          const transferIdx = link.kind === "transfer"
+            ? layoutedLinks.filter((l, idx) => l.kind === "transfer" && idx <= i).length - 1
+            : -1;
+          const fillValue = link.kind === "transfer"
+            ? `url(#transfer-grad-${transferIdx})`
+            : link.color;
+
+          // Calculer le point central du ruban pour placer la flèche
+          // On va prendre le milieu en X et la moyenne des Y source/cible
+          const midX = (link.sourceNode.x + nodeWidth + link.targetNode.x) / 2;
+          // Le path est un ruban — on prend le centre verticalement (approx)
+          // sourceNode.y + h/2 et targetNode.y + h/2 marche pour le simple cas
+          // Mais ici on a des offsets cumulés, donc on calcule autrement :
+          // On extrait du path les coords de début et fin (approximation OK)
+          const pathMatch = link.path.match(/M ([\d.]+) ([\d.]+)[\s\S]*?L ([\d.]+) ([\d.]+)/);
+          let arrowY = 0;
+          if (pathMatch) {
+            const sy0 = parseFloat(pathMatch[2]); // top du ruban à la source
+            const ty1 = parseFloat(pathMatch[4]); // bottom du ruban à la cible
+            arrowY = (sy0 + ty1) / 2;
+          }
+
           return (
-            <path
-              key={i}
-              d={link.path}
-              fill={link.color}
-              fillOpacity={isHovered ? 0.7 : 0.35}
-              stroke="none"
-              style={{ cursor: "pointer", transition: "fill-opacity 0.2s" }}
-              onMouseEnter={() => setHoveredLink(i)}
-              onMouseLeave={() => setHoveredLink(null)}
-            />
+            <g key={i}>
+              <path
+                d={link.path}
+                fill={fillValue}
+                fillOpacity={isHovered ? 0.85 : 0.6}
+                stroke="none"
+                style={{ cursor: "pointer", transition: "fill-opacity 0.2s" }}
+                onMouseEnter={() => setHoveredLink(i)}
+                onMouseLeave={() => setHoveredLink(null)}
+              />
+              {/* Flèche au milieu du ruban indiquant la direction */}
+              <polygon
+                points={`${midX - 5},${arrowY - 5} ${midX + 5},${arrowY} ${midX - 5},${arrowY + 5}`}
+                fill={link.kind === "transfer" ? "#c4b5fd" : link.color}
+                opacity={isHovered ? 1 : 0.85}
+                style={{ pointerEvents: "none", filter: `drop-shadow(0 0 3px ${link.kind === "transfer" ? "#c4b5fd" : link.color})` }}
+              />
+            </g>
           );
         })}
 
@@ -631,16 +691,27 @@ function SankeyDiagram({ allTx, period, t1, t2, vio, green, red, purple }) {
                 {n.emoji || n.icon} {n.label}
               </text>
               {/* Valeur en dessous du label */}
-              <text
-                x={n.col === 0 ? n.x - 8 : (n.col === 2 ? n.x + nodeWidth + 8 : n.x + nodeWidth + 8)}
-                y={n.y + n.h / 2 + 17}
-                fill={n.color}
-                fontSize={10}
-                fontFamily="'Outfit', sans-serif"
-                fontWeight={500}
-                textAnchor={n.col === 0 ? "end" : "start"}>
-                {fmt(n.value)}
-              </text>
+              {(() => {
+                // Pour les comptes (col 1), on affiche le solde réel (peut être négatif)
+                // Pour les sources (col 0) et dépenses (col 2), on affiche le flux total
+                const isAccount = n.col === 1 && n.displayValue !== undefined;
+                const valueToShow = isAccount ? n.displayValue : n.value;
+                const isNegative = isAccount && valueToShow < 0;
+                const valueColor = isNegative ? red : n.color;
+                const valueText = isNegative ? `-${fmt(valueToShow)}` : fmt(valueToShow);
+                return (
+                  <text
+                    x={n.col === 0 ? n.x - 8 : (n.col === 2 ? n.x + nodeWidth + 8 : n.x + nodeWidth + 8)}
+                    y={n.y + n.h / 2 + 17}
+                    fill={valueColor}
+                    fontSize={10}
+                    fontFamily="'Outfit', sans-serif"
+                    fontWeight={isNegative ? 600 : 500}
+                    textAnchor={n.col === 0 ? "end" : "start"}>
+                    {valueText}
+                  </text>
+                );
+              })()}
             </g>
           );
         })}
@@ -2117,7 +2188,7 @@ export default function App() {
         </div>
 
         <G glow={vio} style={{ padding: isDesktop ? 20 : 12 }}>
-          <SankeyDiagram allTx={allTx} period={sankeyPeriod} t1={t1} t2={t2} vio={vio} green={green} red={red} purple={purple} />
+          <SankeyDiagram allTx={allTx} period={sankeyPeriod} initialBalances={initialBalances} t1={t1} t2={t2} vio={vio} green={green} red={red} purple={purple} />
         </G>
 
         {/* Légende */}
