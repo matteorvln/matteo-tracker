@@ -891,14 +891,14 @@ export default function App() {
     // Projection : où serai-je à la date cible si je continue au rythme actuel ?
     const projectedAtTarget = totalEur + (avgMonthlyNet * monthsLeft);
 
-    // Le rythme nécessaire pour atteindre l'objectif (par défaut 250k€)
-    const targetGoal = 250000;
+    // Le rythme nécessaire pour atteindre l'objectif (utilise la variable goal modifiable depuis la sidebar)
+    const targetGoal = goal || GOAL;
     const gap = targetGoal - projectedAtTarget;
     const neededMonthly = monthsLeft > 0 ? (targetGoal - totalEur) / monthsLeft : 0;
     const isOnTrack = projectedAtTarget >= targetGoal;
 
     return { avgMonthlyNet, projectedAtTarget, gap, monthsLeft, neededMonthly, isOnTrack, targetGoal };
-  }, [allTx, totalEur]);
+  }, [allTx, totalEur, goal]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -1492,12 +1492,12 @@ export default function App() {
           </div>
         )}
 
-        {/* CARD TRAJECTOIRE PATRIMOINE → 250k€ AU 31/12/2026 */}
+        {/* CARD TRAJECTOIRE PATRIMOINE → OBJECTIF AU 31/12/2026 */}
         {trajectory.monthsLeft > 0 && trajectory.avgMonthlyNet !== 0 && (
           <G glow={trajectory.isOnTrack ? green : "#fbbf24"} style={{ padding: isDesktop ? "16px 20px" : "14px 16px", marginBottom: isDesktop ? 16 : 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
               <div>
-                <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 4 }}>🎯 Trajectoire vers 250k€</div>
+                <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 4 }}>🎯 Trajectoire vers {fmt(trajectory.targetGoal)}</div>
                 <div style={{ fontSize: 13, color: t1, fontWeight: 500 }}>au 31/12/2026 · dans {trajectory.monthsLeft} mois</div>
               </div>
               <div style={{
@@ -1536,7 +1536,7 @@ export default function App() {
                   {fmt(trajectory.neededMonthly)}
                 </div>
                 <div style={{ fontSize: 10, color: t2, marginTop: 2 }}>
-                  par mois pour atteindre 250k€
+                  par mois pour atteindre {fmt(trajectory.targetGoal)}
                 </div>
               </div>
             </div>
@@ -1851,7 +1851,7 @@ export default function App() {
           <button onClick={() => setChartView("yearly")} style={pill(chartView === "yearly")}>Année</button>
         </div>
 
-        {/* GRAPHIQUE TRAJECTOIRE 250k€ */}
+        {/* GRAPHIQUE TRAJECTOIRE OBJECTIF */}
         {trajectory.monthsLeft > 0 && (() => {
           // Construire les données : passé (réel) + futur (projeté + idéal)
           const data = [];
@@ -1879,9 +1879,9 @@ export default function App() {
           // Futur : on projette mois par mois jusqu'à décembre 2026
           const today = new Date();
           let projectedRunning = lastReal;
-          // Trajectoire idéale : ligne droite vers 250k€
+          // Trajectoire idéale : ligne droite vers l'objectif
           const idealStartValue = lastReal;
-          const idealEndValue = 250000;
+          const idealEndValue = trajectory.targetGoal;
           const totalMonthsToTarget = trajectory.monthsLeft;
 
           for (let i = 1; i <= trajectory.monthsLeft; i++) {
@@ -1900,7 +1900,7 @@ export default function App() {
           return (
             <G glow={trajectory.isOnTrack ? green : "#fbbf24"} style={{ padding: isDesktop ? "18px 12px 12px" : "14px 8px 8px", marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingLeft: 8, paddingRight: 8, flexWrap: "wrap", gap: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>🎯 Trajectoire vers 250k€</div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>🎯 Trajectoire vers {fmt(trajectory.targetGoal)}</div>
                 <div style={{ display: "flex", gap: 12, fontSize: 10, color: t2 }}>
                   <span><span style={{ display: "inline-block", width: 12, height: 2, background: vio, marginRight: 4, verticalAlign: "middle" }}></span>Réel</span>
                   <span><span style={{ display: "inline-block", width: 12, height: 2, background: trajectory.isOnTrack ? green : "#fbbf24", marginRight: 4, verticalAlign: "middle", borderTop: `1px dashed ${trajectory.isOnTrack ? green : "#fbbf24"}` }}></span>Projeté</span>
