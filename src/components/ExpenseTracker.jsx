@@ -24,6 +24,7 @@ const EXP_CATS = [
   { id: "perso", name: "Perso", emoji: "🎮", color: "#c084fc" },
   { id: "sante", name: "Santé", emoji: "🏥", color: "#34d399" },
   { id: "logement", name: "Logement", emoji: "🏠", color: "#fbbf24" },
+  { id: "assurance", name: "Assurance", emoji: "🛡️", color: "#60a5fa" },
 ];
 
 const INC_CATS = [
@@ -35,6 +36,8 @@ const INC_CATS = [
   { id: "unfamous", name: "Unfamous", emoji: "👕", color: "#c084fc" },
   { id: "collaboration", name: "Collab", emoji: "🤝", color: "#22d3ee" },
   { id: "snapchat", name: "Snapchat", emoji: "👻", color: "#facc15" },
+  { id: "loyer_recu", name: "Loyer", emoji: "🏠", color: "#fbbf24" },
+  { id: "assurance_recu", name: "Assurance", emoji: "🛡️", color: "#60a5fa" },
 ];
 
 const GOAL = 200000;
@@ -676,8 +679,42 @@ function SankeyDiagram({ allTx, period, t1, t2, vio, green, red, purple }) {
 }
 
 
-function NumPad({ value, onChange, color }) {
+// Sons clavier : fréquence légèrement différente par chiffre pour un effet satisfaisant
+function playKeySound(key, muted) {
+  if (muted) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // Mapping touche -> fréquence (gamme pentatonique pour que ça sonne bien)
+    const freqMap = {
+      "1": 523, "2": 587, "3": 659,
+      "4": 698, "5": 784, "6": 880,
+      "7": 988, "8": 1047, "9": 1175,
+      "0": 466, ".": 392,
+    };
+    if (key === "⌫") {
+      // Son spécifique pour effacer : descend rapidement
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "square";
+      o.frequency.setValueAtTime(440, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(180, ctx.currentTime + 0.06);
+      g.gain.setValueAtTime(0.05, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.08);
+      return;
+    }
+    const freq = freqMap[key] || 600;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "triangle";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.06, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.06);
+  } catch {}
+}
+
+function NumPad({ value, onChange, color, muted }) {
   const press = (key) => {
+    playKeySound(key, muted);
     if (key === "C") { onChange(""); return; }
     if (key === "⌫") { onChange(value.slice(0, -1)); return; }
     if (key === ".") { if (value.includes(".")) return; onChange(value + "."); return; }
@@ -2050,6 +2087,7 @@ export default function App() {
                 value={f.amount}
                 onChange={(v) => uf("amount", v)}
                 color={f.type === "expense" ? red : f.type === "income" ? green : purple}
+                muted={muted}
               />
 
               <div style={{ marginTop: 12, marginBottom: 10 }}>
