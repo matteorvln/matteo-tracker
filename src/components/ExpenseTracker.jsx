@@ -334,7 +334,348 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, mode = "expense" 
   );
 }
 
-// ─── NUMPAD COMPONENT ───
+// ─── SANKEY COMPONENT (flux d'argent) ───
+function SankeyDiagram({ allTx, period, t1, t2, vio, green, red, purple }) {
+  // Calcul des nœuds et flux selon la période
+  const { nodes, links, totalIn, totalOut, totalTransfers } = useMemo(() => {
+    // Filtrer les transactions selon la période
+    const today = new Date();
+    let startDate;
+    if (period === "month") {
+      startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+    } else if (period === "3months") {
+      startDate = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+    } else {
+      startDate = new Date(2000, 0, 1); // depuis le début
+    }
+    const filteredTx = allTx.filter(tx => new Date(tx.date) >= startDate);
+
+    // Construire les nœuds : sources (col 0), comptes (col 1), "Dépenses" (col 2)
+    const sources = {}; // inc_category -> total
+    const accountIn = {}; // platform -> revenu reçu
+    const accountOut = {}; // platform -> dépenses sorties
+    const transfers = {}; // "from->to" -> montant
+
+    filteredTx.forEach(tx => {
+      if (tx.type === "income") {
+        const src = tx.inc_category || "other";
+        sources[src] = (sources[src] || 0) + tx.amount;
+        accountIn[tx.platform] = (accountIn[tx.platform] || 0) + tx.amount;
+      } else if (tx.type === "expense") {
+        accountOut[tx.platform] = (accountOut[tx.platform] || 0) + tx.amount;
+      } else if (tx.type === "transfer") {
+        const k = `${tx.platform}->${tx.to}`;
+        transfers[k] = (transfers[k] || 0) + tx.amount;
+      }
+    });
+
+    const totalIn = Object.values(sources).reduce((s, v) => s + v, 0);
+    const totalOut = Object.values(accountOut).reduce((s, v) => s + v, 0);
+    const totalTransfers = Object.values(transfers).reduce((s, v) => s + v, 0);
+
+    // Construire la liste des nœuds avec leurs positions
+    const nodes = [];
+    const nodeMap = {}; // id -> index
+
+    // Colonne 0 : sources de revenus
+    const sourceList = INC_CATS.filter(c => sources[c.id] > 0);
+    sourceList.forEach(c => {
+      nodeMap[`src_${c.id}`] = nodes.length;
+      nodes.push({
+        id: `src_${c.id}`,
+        label: c.name,
+        emoji: c.emoji,
+        color: c.color,
+        value: sources[c.id],
+        col: 0,
+      });
+    });
+
+    // Colonne 1 : comptes (uniquement ceux qui ont eu de l'activité)
+    const activePlatforms = PLATFORMS.filter(p =>
+      accountIn[p.id] > 0 || accountOut[p.id] > 0 ||
+      Object.keys(transfers).some(k => k.startsWith(p.id + "->") || k.endsWith("->" + p.id))
+    );
+    activePlatforms.forEach(p => {
+      nodeMap[`acc_${p.id}`] = nodes.length;
+      nodes.push({
+        id: `acc_${p.id}`,
+        label: p.name,
+        icon: p.icon,
+        color: p.color,
+        value: Math.max(accountIn[p.id] || 0, accountOut[p.id] || 0),
+        col: 1,
+      });
+    });
+
+    // Colonne 2 : un seul nœud "Dépenses"
+    if (totalOut > 0) {
+      nodeMap["dep_total"] = nodes.length;
+      nodes.push({
+        id: "dep_total",
+        label: "Dépenses",
+        emoji: "💸",
+        color: red,
+        value: totalOut,
+        col: 2,
+      });
+    }
+
+    // Construire les liens
+    const links = [];
+
+    // Sources -> comptes (revenus)
+    filteredTx.filter(tx => tx.type === "income").forEach(tx => {
+      const srcKey = `src_${tx.inc_category || "other"}`;
+      const accKey = `acc_${tx.platform}`;
+      if (nodeMap[srcKey] === undefined || nodeMap[accKey] === undefined) return;
+      const existing = links.find(l => l.source === srcKey && l.target === accKey);
+      if (existing) existing.value += tx.amount;
+      else links.push({ source: srcKey, target: accKey, value: tx.amount, kind: "income" });
+    });
+
+    // Comptes -> comptes (transferts)
+    Object.entries(transfers).forEach(([k, v]) => {
+      const [from, to] = k.split("->");
+      const fromKey = `acc_${from}`;
+      const toKey = `acc_${to}`;
+      if (nodeMap[fromKey] === undefined || nodeMap[toKey] === undefined) return;
+      links.push({ source: fromKey, target: toKey, value: v, kind: "transfer" });
+    });
+
+    // Comptes -> dépenses
+    Object.entries(accountOut).forEach(([pid, v]) => {
+      const accKey = `acc_${pid}`;
+      if (nodeMap[accKey] === undefined || nodeMap["dep_total"] === undefined) return;
+      links.push({ source: accKey, target: "dep_total", value: v, kind: "expense" });
+    });
+
+    return { nodes, links, totalIn, totalOut, totalTransfers };
+  }, [allTx, period, red]);
+
+  const [hoveredLink, setHoveredLink] = useState(null);
+  const [hoveredNode, setHoveredNode] = useState(null);
+
+  // Layout : on calcule les positions Y de chaque nœud
+  // Hauteur proportionnelle à la valeur du nœud
+  const W = 900, H = 520;
+  const colX = [80, W / 2, W - 80]; // 3 colonnes
+  const nodeWidth = 14;
+  const nodePadding = 12;
+
+  // Pour chaque colonne, calculer la hauteur totale et les positions
+  const layoutedNodes = useMemo(() => {
+    const cols = [[], [], []];
+    nodes.forEach((n, i) => cols[n.col].push({ ...n, idx: i }));
+
+    // Pour chaque colonne, calculer un "value total" pour scaler
+    const colTotals = cols.map(col => col.reduce((s, n) => s + n.value, 0));
+    const maxColTotal = Math.max(...colTotals, 1);
+
+    // Hauteur disponible (avec marges)
+    const availH = H - 40;
+
+    const result = [];
+    cols.forEach((col, ci) => {
+      // Trier les nœuds par valeur décroissante pour avoir les plus gros en haut
+      const sorted = [...col].sort((a, b) => b.value - a.value);
+      const colTotal = colTotals[ci];
+      if (colTotal === 0) return;
+
+      // Espace vertical alloué proportionnellement
+      const totalGap = (sorted.length - 1) * nodePadding;
+      const availForBars = availH - totalGap;
+      const scale = availForBars / colTotal;
+
+      let y = 20;
+      sorted.forEach(n => {
+        const h = Math.max(n.value * scale, 6); // hauteur min 6px
+        result.push({ ...n, x: colX[ci], y, h });
+        y += h + nodePadding;
+      });
+    });
+
+    // Reordonner pour matcher l'index original
+    const byIdx = {};
+    result.forEach(n => byIdx[n.idx] = n);
+    return nodes.map((_, i) => byIdx[i]).filter(Boolean);
+  }, [nodes]);
+
+  // Calcul des positions Y des liens sur chaque nœud (offset cumulatif)
+  const layoutedLinks = useMemo(() => {
+    if (layoutedNodes.length === 0) return [];
+
+    // Pour chaque nœud, on track combien d'espace est déjà utilisé en sortie et en entrée
+    const sourceOffsets = {}; // nodeIdx -> offset Y cumulé pour les liens sortants
+    const targetOffsets = {}; // nodeIdx -> offset Y cumulé pour les liens entrants
+
+    // Trier les liens par valeur décroissante pour que les plus gros soient en haut
+    const sortedLinks = [...links].sort((a, b) => b.value - a.value);
+
+    return sortedLinks.map(link => {
+      const sourceNode = layoutedNodes.find(n => n.id === link.source);
+      const targetNode = layoutedNodes.find(n => n.id === link.target);
+      if (!sourceNode || !targetNode) return null;
+
+      // Hauteur du lien proportionnelle à sa valeur
+      const sourceTotal = layoutedNodes.find(n => n.id === link.source).value;
+      const targetTotal = layoutedNodes.find(n => n.id === link.target).value;
+      const linkH_source = (link.value / sourceTotal) * sourceNode.h;
+      const linkH_target = (link.value / targetTotal) * targetNode.h;
+
+      const sOff = sourceOffsets[link.source] || 0;
+      const tOff = targetOffsets[link.target] || 0;
+
+      const sy0 = sourceNode.y + sOff;
+      const sy1 = sy0 + linkH_source;
+      const ty0 = targetNode.y + tOff;
+      const ty1 = ty0 + linkH_target;
+
+      sourceOffsets[link.source] = sOff + linkH_source;
+      targetOffsets[link.target] = tOff + linkH_target;
+
+      // Coordonnées X
+      const sx = sourceNode.x + nodeWidth;
+      const tx = targetNode.x;
+
+      // Bezier curve : la courbe passe par les milieux
+      const midX = (sx + tx) / 2;
+
+      // Path pour le ruban (haut + bas)
+      const path = `
+        M ${sx} ${sy0}
+        C ${midX} ${sy0}, ${midX} ${ty0}, ${tx} ${ty0}
+        L ${tx} ${ty1}
+        C ${midX} ${ty1}, ${midX} ${sy1}, ${sx} ${sy1}
+        Z
+      `;
+
+      // Couleur selon kind
+      let color;
+      if (link.kind === "income") color = sourceNode.color;
+      else if (link.kind === "transfer") color = "#a78bfa"; // violet pâle pour transferts
+      else color = sourceNode.color; // dépense = couleur du compte source
+
+      return { ...link, path, color, sourceNode, targetNode };
+    }).filter(Boolean);
+  }, [links, layoutedNodes]);
+
+  if (nodes.length === 0) {
+    return (
+      <div style={{ padding: 40, textAlign: "center", color: t2, fontSize: 13 }}>
+        Aucune transaction sur cette période
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {/* Liens (en arrière-plan) */}
+        {layoutedLinks.map((link, i) => {
+          const isHovered = hoveredLink === i;
+          return (
+            <path
+              key={i}
+              d={link.path}
+              fill={link.color}
+              fillOpacity={isHovered ? 0.7 : 0.35}
+              stroke="none"
+              style={{ cursor: "pointer", transition: "fill-opacity 0.2s" }}
+              onMouseEnter={() => setHoveredLink(i)}
+              onMouseLeave={() => setHoveredLink(null)}
+            />
+          );
+        })}
+
+        {/* Nœuds (au-dessus) */}
+        {layoutedNodes.map((n, i) => {
+          const isHovered = hoveredNode === i;
+          return (
+            <g key={n.id}
+              onMouseEnter={() => setHoveredNode(i)}
+              onMouseLeave={() => setHoveredNode(null)}
+              style={{ cursor: "pointer" }}>
+              <rect
+                x={n.x} y={n.y}
+                width={nodeWidth} height={n.h}
+                fill={n.color}
+                rx={3}
+                style={{ filter: isHovered ? `drop-shadow(0 0 8px ${n.color})` : `drop-shadow(0 0 3px ${n.color}80)` }}
+              />
+              {/* Label */}
+              <text
+                x={n.col === 0 ? n.x - 8 : (n.col === 2 ? n.x + nodeWidth + 8 : n.x + nodeWidth + 8)}
+                y={n.y + n.h / 2 + 4}
+                fill={t1}
+                fontSize={11}
+                fontFamily="'Outfit', sans-serif"
+                fontWeight={600}
+                textAnchor={n.col === 0 ? "end" : "start"}>
+                {n.emoji || n.icon} {n.label}
+              </text>
+              {/* Valeur en dessous du label */}
+              <text
+                x={n.col === 0 ? n.x - 8 : (n.col === 2 ? n.x + nodeWidth + 8 : n.x + nodeWidth + 8)}
+                y={n.y + n.h / 2 + 17}
+                fill={n.color}
+                fontSize={10}
+                fontFamily="'Outfit', sans-serif"
+                fontWeight={500}
+                textAnchor={n.col === 0 ? "end" : "start"}>
+                {fmt(n.value)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Tooltip lien */}
+      {hoveredLink !== null && layoutedLinks[hoveredLink] && (
+        <div style={{
+          position: "absolute", top: 10, right: 10,
+          background: "rgba(10,10,20,0.95)", border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 10, padding: "10px 14px", fontSize: 12, color: t1,
+          fontFamily: "'Outfit', sans-serif", pointerEvents: "none",
+          backdropFilter: "blur(10px)",
+        }}>
+          <div style={{ fontSize: 10, color: t2, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1 }}>
+            {layoutedLinks[hoveredLink].kind === "income" ? "💰 Revenu" :
+             layoutedLinks[hoveredLink].kind === "transfer" ? "↔ Transfert" : "💸 Dépense"}
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>
+            {layoutedLinks[hoveredLink].sourceNode.emoji || layoutedLinks[hoveredLink].sourceNode.icon} {layoutedLinks[hoveredLink].sourceNode.label}
+            <span style={{ color: t2, margin: "0 6px" }}>→</span>
+            {layoutedLinks[hoveredLink].targetNode.emoji || layoutedLinks[hoveredLink].targetNode.icon} {layoutedLinks[hoveredLink].targetNode.label}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: layoutedLinks[hoveredLink].color, marginTop: 4 }}>
+            {fmt2(layoutedLinks[hoveredLink].value)}
+          </div>
+        </div>
+      )}
+
+      {/* Tooltip nœud */}
+      {hoveredNode !== null && layoutedNodes[hoveredNode] && hoveredLink === null && (
+        <div style={{
+          position: "absolute", top: 10, right: 10,
+          background: "rgba(10,10,20,0.95)", border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 10, padding: "10px 14px", fontSize: 12, color: t1,
+          fontFamily: "'Outfit', sans-serif", pointerEvents: "none",
+          backdropFilter: "blur(10px)",
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>
+            {layoutedNodes[hoveredNode].emoji || layoutedNodes[hoveredNode].icon} {layoutedNodes[hoveredNode].label}
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: layoutedNodes[hoveredNode].color, marginTop: 4 }}>
+            {fmt2(layoutedNodes[hoveredNode].value)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function NumPad({ value, onChange, color }) {
   const press = (key) => {
     if (key === "C") { onChange(""); return; }
@@ -395,6 +736,8 @@ export default function App() {
   const [heatmapMode, setHeatmapMode] = useState("expense"); // "expense" | "income" | "net"
   const [muted, setMuted] = useState(false);
   const [dismissedInsights, setDismissedInsights] = useState(new Set());
+  const [sankeyPeriod, setSankeyPeriod] = useState("3months"); // "month" | "3months" | "all"
+  const [txTypeFilter, setTxTypeFilter] = useState("all"); // "all" | "income" | "expense" | "transfer"
 
   const [f, setF] = useState({ type: "expense", amount: "", platform: "revolut", category: "quotidien", incCategory: "rainbet_video", note: "", date: new Date().toISOString().split("T")[0], to: "phantom", fees: "", makeRecurring: true, day: 1 });
   const uf = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -476,6 +819,7 @@ export default function App() {
     let txs = allTx.filter(tx => mkey(tx.date) === month);
     if (pFilter !== "all") txs = txs.filter(tx => tx.platform === pFilter || tx.to === pFilter);
     if (eleaFilter) txs = txs.filter(tx => (tx.note || "").toLowerCase().includes("elea"));
+    if (txTypeFilter !== "all") txs = txs.filter(tx => tx.type === txTypeFilter);
     if (search) {
       const q = search.toLowerCase();
       txs = txs.filter(tx => {
@@ -484,8 +828,10 @@ export default function App() {
         return (tx.note || "").toLowerCase().includes(q) || (cat?.name || "").toLowerCase().includes(q) || (p?.name || "").toLowerCase().includes(q);
       });
     }
-    return sortBy === "amount" ? txs.sort((a, b) => b.amount - a.amount) : txs.sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [allTx, month, pFilter, search, sortBy, eleaFilter]);
+    if (sortBy === "amount_desc") return txs.sort((a, b) => b.amount - a.amount);
+    if (sortBy === "amount_asc") return txs.sort((a, b) => a.amount - b.amount);
+    return txs.sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [allTx, month, pFilter, search, sortBy, eleaFilter, txTypeFilter]);
 
   const stats = useMemo(() => {
     let inc = 0, exp = 0; const bc = {}, ic = {};
@@ -945,6 +1291,7 @@ export default function App() {
     ["details", "📊", "Détails"],
     ["chart", "📈", "Évolution"],
     ["heatmap", "📅", "Heatmap"],
+    ["flux", "🌊", "Flux"],
     ["subs", "🔄", "Abos"],
     ["refunds", "💸", "Remb."],
   ];
@@ -1029,7 +1376,18 @@ export default function App() {
             <div>
               <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <button onClick={() => setShowSearch(!showSearch)} style={{ ...pill(showSearch), padding: "6px 12px" }}>🔍</button>
-                <button onClick={() => setSortBy(sortBy === "date" ? "amount" : "date")} style={{ ...pill(false), padding: "6px 12px", fontSize: 11 }}>{sortBy === "date" ? "📅 Date" : "💰 Montant"}</button>
+                <button onClick={() => {
+                  // cycle: date -> amount_desc -> amount_asc -> date
+                  if (sortBy === "date") setSortBy("amount_desc");
+                  else if (sortBy === "amount_desc") setSortBy("amount_asc");
+                  else setSortBy("date");
+                }} style={{ ...pill(sortBy !== "date"), padding: "6px 12px", fontSize: 11 }}>
+                  {sortBy === "date" ? "📅 Date" : sortBy === "amount_desc" ? "💰 ↓ Plus grand" : "💰 ↑ Plus petit"}
+                </button>
+                <button onClick={() => setTxTypeFilter(txTypeFilter === "all" ? "income" : txTypeFilter === "income" ? "expense" : "all")}
+                  style={{ ...pill(txTypeFilter !== "all", txTypeFilter === "income" ? green : txTypeFilter === "expense" ? red : null), padding: "6px 12px", fontSize: 11 }}>
+                  {txTypeFilter === "all" ? "Tout" : txTypeFilter === "income" ? "📥 Rentrées" : "📤 Sorties"}
+                </button>
                 <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "6px 12px", fontSize: 11 }}>💕 Elea</button>
                 <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
                   <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "6px 10px", fontSize: 11 }}>Tout</button>
@@ -1070,7 +1428,17 @@ export default function App() {
 
             <div style={{ display: "flex", gap: 5, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
               <button onClick={() => setShowSearch(!showSearch)} style={{ ...pill(showSearch), padding: "5px 10px" }}>🔍</button>
-              <button onClick={() => setSortBy(sortBy === "date" ? "amount" : "date")} style={{ ...pill(false), padding: "5px 10px", fontSize: 11 }}>{sortBy === "date" ? "📅" : "💰"}</button>
+              <button onClick={() => {
+                if (sortBy === "date") setSortBy("amount_desc");
+                else if (sortBy === "amount_desc") setSortBy("amount_asc");
+                else setSortBy("date");
+              }} style={{ ...pill(sortBy !== "date"), padding: "5px 10px", fontSize: 11 }}>
+                {sortBy === "date" ? "📅" : sortBy === "amount_desc" ? "💰↓" : "💰↑"}
+              </button>
+              <button onClick={() => setTxTypeFilter(txTypeFilter === "all" ? "income" : txTypeFilter === "income" ? "expense" : "all")}
+                style={{ ...pill(txTypeFilter !== "all", txTypeFilter === "income" ? green : txTypeFilter === "expense" ? red : null), padding: "5px 10px", fontSize: 11 }}>
+                {txTypeFilter === "all" ? "Type" : txTypeFilter === "income" ? "📥" : "📤"}
+              </button>
               <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "5px 10px", fontSize: 11 }}>💕</button>
               <div style={{ display: "flex", gap: 3, overflowX: "auto", scrollbarWidth: "none" }}>
                 <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "5px 8px", fontSize: 10 }}>Tout</button>
@@ -1374,6 +1742,68 @@ export default function App() {
         )}
       </>)}
 
+      {/* FLUX (SANKEY) */}
+      {tab === "flux" && (<>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>🌊 Flux d'argent</div>
+            <div style={{ fontSize: 11, color: t2, marginTop: 2 }}>D'où vient ton argent et où il va</div>
+          </div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            <button onClick={() => setSankeyPeriod("month")} style={pill(sankeyPeriod === "month")}>Mois en cours</button>
+            <button onClick={() => setSankeyPeriod("3months")} style={pill(sankeyPeriod === "3months")}>3 derniers mois</button>
+            <button onClick={() => setSankeyPeriod("all")} style={pill(sankeyPeriod === "all")}>Depuis le début</button>
+          </div>
+        </div>
+
+        {/* Stats récap */}
+        <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "repeat(3, 1fr)" : "1fr", gap: 10, marginBottom: 14 }}>
+          {(() => {
+            const today = new Date();
+            let startDate;
+            if (sankeyPeriod === "month") startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            else if (sankeyPeriod === "3months") startDate = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+            else startDate = new Date(2000, 0, 1);
+            const filtered = allTx.filter(tx => new Date(tx.date) >= startDate);
+            const inc = filtered.filter(tx => tx.type === "income").reduce((s, tx) => s + tx.amount, 0);
+            const exp = filtered.filter(tx => tx.type === "expense").reduce((s, tx) => s + tx.amount, 0);
+            const tr = filtered.filter(tx => tx.type === "transfer").reduce((s, tx) => s + tx.amount, 0);
+            return (
+              <>
+                <G glow={green} style={{ padding: "12px 16px" }}>
+                  <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>📥 Total reçu</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: green }}>+{fmt(inc)}</div>
+                </G>
+                <G glow={red} style={{ padding: "12px 16px" }}>
+                  <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>📤 Total dépensé</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: red }}>-{fmt(exp)}</div>
+                </G>
+                <G glow={vio} style={{ padding: "12px 16px" }}>
+                  <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>↔ Transferts internes</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: vio }}>{fmt(tr)}</div>
+                </G>
+              </>
+            );
+          })()}
+        </div>
+
+        <G glow={vio} style={{ padding: isDesktop ? 20 : 12 }}>
+          <SankeyDiagram allTx={allTx} period={sankeyPeriod} t1={t1} t2={t2} vio={vio} green={green} red={red} purple={purple} />
+        </G>
+
+        {/* Légende */}
+        <div style={{ marginTop: 14, padding: "12px 16px", borderRadius: 10, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.05)", fontSize: 11, color: t2 }}>
+          <div style={{ fontWeight: 600, color: t1, marginBottom: 6 }}>💡 Comment lire ce diagramme ?</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div>• <span style={{ color: green, fontWeight: 600 }}>À gauche</span> : les sources de tes revenus (Rainbet, YouTube, etc.)</div>
+            <div>• <span style={{ color: vioBright, fontWeight: 600 }}>Au milieu</span> : tes comptes (Revolut, Phantom, etc.) — l'argent transite par eux</div>
+            <div>• <span style={{ color: red, fontWeight: 600 }}>À droite</span> : tes dépenses totales</div>
+            <div>• Les <span style={{ color: vio, fontWeight: 600 }}>traits violets</span> entre comptes = transferts internes</div>
+            <div>• Survole un trait ou un bloc pour voir le détail</div>
+          </div>
+        </div>
+      </>)}
+
       {/* SUBS */}
       {tab === "subs" && (<>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -1571,7 +2001,7 @@ export default function App() {
 
       {/* TABS */}
       <div style={{ padding: "0 16px 8px", display: "flex", gap: 5, overflowX: "auto", scrollbarWidth: "none" }}>
-        {[["home","Accueil"],["details","Détails"],["chart","Évolution"],["heatmap","📅 Heatmap"],["subs","Abos"],["refunds","💸 Remb."]].map(([k,l]) => (
+        {[["home","Accueil"],["details","Détails"],["chart","Évolution"],["heatmap","📅 Heatmap"],["flux","🌊 Flux"],["subs","Abos"],["refunds","💸 Remb."]].map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)} style={pill(tab === k)}>{l}</button>
         ))}
         <button onClick={toggleMute} style={{ ...pill(false), marginLeft: "auto", fontSize: 11, color: muted ? red : t2 }}>{muted ? "🔇" : "🔊"}</button>
