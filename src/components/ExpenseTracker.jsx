@@ -754,6 +754,8 @@ export default function App() {
   const [subscriptions, setSubscriptions] = useState([]);
   const [refunds, setRefunds] = useState([]);
   const [goal, setGoal] = useState(GOAL);
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [editGoalVal, setEditGoalVal] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [modal, setModal] = useState(null);
   const [month, setMonth] = useState(mkey(new Date()));
@@ -1332,6 +1334,15 @@ export default function App() {
     const val = parseFloat(editBalVal) || 0;
     await supabase.from('initial_balances').upsert({ platform: pid, amount: val });
     setEditBal(null); await loadAll();
+  };
+
+  // Sauvegarder le nouvel objectif dans Supabase
+  const saveGoal = async () => {
+    const val = parseFloat(editGoalVal);
+    if (!val || val <= 0) { setEditingGoal(false); return; }
+    await supabase.from('settings').upsert({ key: 'goal', value: String(val) });
+    setEditingGoal(false);
+    await loadAll();
   };
   const addSub = async () => {
     const a = parseFloat(sf.amount); if (!a || !sf.name) return;
@@ -2253,7 +2264,28 @@ export default function App() {
           <G glow={vio} style={{ padding: 14 }}>
             <div style={{ fontSize: 9, color: t2, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 4 }}>Patrimoine</div>
             <div style={{ fontSize: 22, fontWeight: 700, color: totalEur < 0 ? red : t1, marginBottom: 10, lineHeight: 1.1 }}>{fmtSigned(totalEur)}</div>
-            <div style={{ fontSize: 9, color: t2, marginBottom: 4 }}>🎯 Objectif {fmt(goal)}</div>
+            {editingGoal ? (
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontSize: 9, color: vioBright, marginBottom: 4 }}>🎯 Nouvel objectif (€)</div>
+                <input
+                  type="number"
+                  value={editGoalVal}
+                  onChange={e => setEditGoalVal(e.target.value)}
+                  autoFocus
+                  onKeyDown={e => { if (e.key === "Enter") saveGoal(); if (e.key === "Escape") setEditingGoal(false); }}
+                  onBlur={saveGoal}
+                  style={{ ...inputStyle, padding: "4px 8px", fontSize: 12 }}
+                />
+              </div>
+            ) : (
+              <div
+                onClick={() => { setEditingGoal(true); setEditGoalVal(String(goal)); }}
+                style={{ fontSize: 9, color: t2, marginBottom: 4, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
+                title="Cliquer pour modifier l'objectif"
+              >
+                🎯 Objectif {fmt(goal)} <span style={{ opacity: 0.6 }}>🖌️</span>
+              </div>
+            )}
             <div style={{ height: 8, borderRadius: 4, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
               <div style={{ height: "100%", width: `${goalPct}%`, background: `linear-gradient(90deg, ${purple}, ${vioBright}, #e879f9)`, boxShadow: `0 0 12px ${vio}60`, transition: "width 0.8s" }} />
             </div>
@@ -2324,9 +2356,27 @@ export default function App() {
       {/* GOAL */}
       <div style={{ padding: "10px 16px 0" }}>
         <G style={{ padding: "12px 14px" }} glow={vio}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <span style={{ fontSize: 11, color: t2 }}>🎯 Objectif</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: vioBright }}>{fmtSigned(totalEur)} / {fmt(goal)}</span>
+            {editingGoal ? (
+              <input
+                type="number"
+                value={editGoalVal}
+                onChange={e => setEditGoalVal(e.target.value)}
+                autoFocus
+                onKeyDown={e => { if (e.key === "Enter") saveGoal(); if (e.key === "Escape") setEditingGoal(false); }}
+                onBlur={saveGoal}
+                style={{ ...inputStyle, padding: "3px 8px", fontSize: 12, width: 130, textAlign: "right" }}
+              />
+            ) : (
+              <span
+                onClick={() => { setEditingGoal(true); setEditGoalVal(String(goal)); }}
+                style={{ fontSize: 12, fontWeight: 600, color: vioBright, cursor: "pointer" }}
+                title="Cliquer pour modifier"
+              >
+                {fmtSigned(totalEur)} / {fmt(goal)} 🖌️
+              </span>
+            )}
           </div>
           <div style={{ height: 10, borderRadius: 5, background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
             <div style={{ height: "100%", borderRadius: 5, width: `${goalPct}%`, background: `linear-gradient(90deg, ${purple}, ${vioBright}, #e879f9)`, boxShadow: `0 0 16px ${vio}70`, transition: "width 0.8s cubic-bezier(0.4,0,0.2,1)" }} />
