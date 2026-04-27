@@ -72,6 +72,75 @@ function playTick() {
   } catch {}
 }
 
+// Son "click" satisfaisant pour valider une dépense
+function playExpenseClick(muted) {
+  if (muted) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "triangle"; o.frequency.setValueAtTime(440, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.08);
+    g.gain.setValueAtTime(0.08, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.1);
+  } catch {}
+}
+
+// Son "ka-ching" caisse enregistreuse pour les revenus (style Shopify)
+function playCashRegister(muted) {
+  if (muted) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // Premier "ding" aigu
+    const o1 = ctx.createOscillator(), g1 = ctx.createGain();
+    o1.type = "sine"; o1.frequency.value = 1318.51; // E6
+    g1.gain.setValueAtTime(0.15, ctx.currentTime);
+    g1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    o1.connect(g1); g1.connect(ctx.destination); o1.start(ctx.currentTime); o1.stop(ctx.currentTime + 0.15);
+    // Deuxième "ding" plus aigu
+    const o2 = ctx.createOscillator(), g2 = ctx.createGain();
+    o2.type = "sine"; o2.frequency.value = 1567.98; // G6
+    g2.gain.setValueAtTime(0.15, ctx.currentTime + 0.08);
+    g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    o2.connect(g2); g2.connect(ctx.destination); o2.start(ctx.currentTime + 0.08); o2.stop(ctx.currentTime + 0.25);
+    // "Cling" final cristallin
+    const o3 = ctx.createOscillator(), g3 = ctx.createGain();
+    o3.type = "sine"; o3.frequency.value = 2093; // C7
+    g3.gain.setValueAtTime(0.1, ctx.currentTime + 0.18);
+    g3.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    o3.connect(g3); g3.connect(ctx.destination); o3.start(ctx.currentTime + 0.18); o3.stop(ctx.currentTime + 0.45);
+  } catch {}
+}
+
+// Son "swoosh" pour les transferts
+function playSwoosh(muted) {
+  if (muted) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(200, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.18);
+    g.gain.setValueAtTime(0.06, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.22);
+  } catch {}
+}
+
+// Son léger pour suppression
+function playDelete(muted) {
+  if (muted) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "square"; o.frequency.setValueAtTime(300, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.12);
+    g.gain.setValueAtTime(0.04, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.15);
+  } catch {}
+}
+
 function genRec(subs, mk) {
   const [y, m] = mk.split("-").map(Number);
   return subs.filter(s => s.active && mk >= mkey(s.start_date)).map(s => {
@@ -115,19 +184,32 @@ const G = ({ children, style, glow, onClick }) => (
 );
 
 // ─── HEATMAP COMPONENT ───
-function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
+function Heatmap({ allTx, year, onCellClick, selectedDate, t2, mode = "expense" }) {
   const dailyData = useMemo(() => {
     const map = {};
     allTx.forEach(tx => {
-      if (tx.type !== "expense") return;
       const txYear = new Date(tx.date).getFullYear();
       if (txYear !== year) return;
-      map[tx.date] = (map[tx.date] || 0) + tx.amount;
+      if (mode === "expense") {
+        if (tx.type !== "expense") return;
+        map[tx.date] = (map[tx.date] || 0) + tx.amount;
+      } else if (mode === "income") {
+        if (tx.type !== "income") return;
+        map[tx.date] = (map[tx.date] || 0) + tx.amount;
+      } else if (mode === "net") {
+        // Net = revenus - dépenses (les transferts ne comptent pas)
+        if (tx.type === "income") map[tx.date] = (map[tx.date] || 0) + tx.amount;
+        else if (tx.type === "expense") map[tx.date] = (map[tx.date] || 0) - tx.amount;
+      }
     });
     return map;
-  }, [allTx, year]);
+  }, [allTx, year, mode]);
 
-  const maxVal = Math.max(...Object.values(dailyData), 1);
+  // Pour les modes exp/inc on prend la valeur max. Pour le net on prend la magnitude max.
+  const values = Object.values(dailyData);
+  const maxVal = mode === "net"
+    ? Math.max(...values.map(v => Math.abs(v)), 1)
+    : Math.max(...values, 1);
 
   const yearStart = new Date(year, 0, 1);
   const yearEnd = new Date(year, 11, 31);
@@ -146,6 +228,7 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
       month: cur.getMonth(),
       inYear,
       value: dailyData[k] || 0,
+      hasData: dailyData[k] !== undefined,
     });
     cur.setDate(cur.getDate() + 1);
   }
@@ -165,14 +248,48 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
   const width = totalWeeks * (cellSize + gap);
   const height = 7 * (cellSize + gap) + 18;
 
-  const colorFor = (val) => {
+  // Couleurs selon le mode
+  const colorFor = (val, hasData) => {
+    if (!hasData) return "rgba(255,255,255,0.04)";
+    if (mode === "expense") {
+      const intensity = Math.min(val / maxVal, 1);
+      if (intensity < 0.25) return "rgba(244,114,96,0.25)";
+      if (intensity < 0.5) return "rgba(244,114,96,0.5)";
+      if (intensity < 0.75) return "rgba(244,114,96,0.75)";
+      return "rgba(244,114,96,1)";
+    }
+    if (mode === "income") {
+      const intensity = Math.min(val / maxVal, 1);
+      if (intensity < 0.25) return "rgba(52,211,153,0.25)";
+      if (intensity < 0.5) return "rgba(52,211,153,0.5)";
+      if (intensity < 0.75) return "rgba(52,211,153,0.75)";
+      return "rgba(52,211,153,1)";
+    }
+    // Mode net : vert si positif, rouge si négatif
     if (val === 0) return "rgba(255,255,255,0.04)";
-    const intensity = Math.min(val / maxVal, 1);
-    if (intensity < 0.25) return "rgba(244,114,96,0.25)";
-    if (intensity < 0.5) return "rgba(244,114,96,0.5)";
-    if (intensity < 0.75) return "rgba(244,114,96,0.75)";
-    return "rgba(244,114,96,1)";
+    const intensity = Math.min(Math.abs(val) / maxVal, 1);
+    if (val > 0) {
+      if (intensity < 0.25) return "rgba(52,211,153,0.25)";
+      if (intensity < 0.5) return "rgba(52,211,153,0.5)";
+      if (intensity < 0.75) return "rgba(52,211,153,0.75)";
+      return "rgba(52,211,153,1)";
+    } else {
+      if (intensity < 0.25) return "rgba(244,114,96,0.25)";
+      if (intensity < 0.5) return "rgba(244,114,96,0.5)";
+      if (intensity < 0.75) return "rgba(244,114,96,0.75)";
+      return "rgba(244,114,96,1)";
+    }
   };
+
+  // Légende selon le mode
+  const legendColors = mode === "income"
+    ? ["rgba(255,255,255,0.04)", "rgba(52,211,153,0.25)", "rgba(52,211,153,0.5)", "rgba(52,211,153,0.75)", "rgba(52,211,153,1)"]
+    : mode === "net"
+      ? ["rgba(244,114,96,1)", "rgba(244,114,96,0.5)", "rgba(255,255,255,0.04)", "rgba(52,211,153,0.5)", "rgba(52,211,153,1)"]
+      : ["rgba(255,255,255,0.04)", "rgba(244,114,96,0.25)", "rgba(244,114,96,0.5)", "rgba(244,114,96,0.75)", "rgba(244,114,96,1)"];
+  const legendLabels = mode === "net"
+    ? ["Déficit", "", "0", "", "Bénéfice"]
+    : ["Moins", "", "", "", "Plus"];
 
   return (
     <div style={{ overflowX: "auto", scrollbarWidth: "thin" }}>
@@ -195,23 +312,23 @@ function Heatmap({ allTx, year, onCellClick, selectedDate, t2, red }) {
               width={cellSize}
               height={cellSize}
               rx={2}
-              fill={colorFor(c.value)}
+              fill={colorFor(c.value, c.hasData)}
               stroke={isSelected ? "#a78bfa" : "transparent"}
               strokeWidth={isSelected ? 1.5 : 0}
               style={{ cursor: "pointer" }}
               onClick={() => onCellClick(c.date)}
             >
-              <title>{c.date} : {fmt2(c.value)}</title>
+              <title>{c.date} : {mode === "net" && c.value < 0 ? "-" : mode === "net" && c.value > 0 ? "+" : ""}{fmt2(c.value)}</title>
             </rect>
           );
         })}
       </svg>
       <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 9, color: t2 }}>
-        <span>Moins</span>
-        {["rgba(255,255,255,0.04)", "rgba(244,114,96,0.25)", "rgba(244,114,96,0.5)", "rgba(244,114,96,0.75)", "rgba(244,114,96,1)"].map(c => (
-          <div key={c} style={{ width: 11, height: 11, borderRadius: 2, background: c }} />
+        <span>{legendLabels[0]}</span>
+        {legendColors.map((c, i) => (
+          <div key={i} style={{ width: 11, height: 11, borderRadius: 2, background: c }} title={legendLabels[i]} />
         ))}
-        <span>Plus</span>
+        <span>{legendLabels[4]}</span>
       </div>
     </div>
   );
@@ -275,8 +392,11 @@ export default function App() {
   const [refundForm, setRefundForm] = useState({ label: "", amount: "", date: new Date().toISOString().split("T")[0] });
   const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
   const [heatmapSelectedDate, setHeatmapSelectedDate] = useState(null);
+  const [heatmapMode, setHeatmapMode] = useState("expense"); // "expense" | "income" | "net"
+  const [muted, setMuted] = useState(false);
+  const [dismissedInsights, setDismissedInsights] = useState(new Set());
 
-  const [f, setF] = useState({ type: "expense", amount: "", platform: "revolut", category: "quotidien", incCategory: "rainbet_video", note: "", date: new Date().toISOString().split("T")[0], to: "phantom", fees: "" });
+  const [f, setF] = useState({ type: "expense", amount: "", platform: "revolut", category: "quotidien", incCategory: "rainbet_video", note: "", date: new Date().toISOString().split("T")[0], to: "phantom", fees: "", makeRecurring: true, day: 1 });
   const uf = (k, v) => setF(p => ({ ...p, [k]: v }));
   const [sf, setSf] = useState({ name: "", amount: "", platform: "revolut", day: 1 });
   const usf = (k, v) => setSf(p => ({ ...p, [k]: v }));
@@ -284,6 +404,22 @@ export default function App() {
   const prevPctRef = useRef(0);
 
   useEffect(() => { loadAll(); }, []);
+
+  // Charger préférence son muet depuis localStorage
+  useEffect(() => {
+    try {
+      const m = localStorage.getItem("tracker_muted");
+      if (m === "true") setMuted(true);
+    } catch {}
+  }, []);
+
+  const toggleMute = () => {
+    setMuted(prev => {
+      const next = !prev;
+      try { localStorage.setItem("tracker_muted", String(next)); } catch {}
+      return next;
+    });
+  };
 
   async function loadAll() {
     const [{ data: txs }, { data: subs }, { data: bals }, { data: sets }, { data: refs }] = await Promise.all([
@@ -500,16 +636,37 @@ export default function App() {
   const totalPendingRefunds = pendingRefunds.reduce((s, r) => s + r.amount, 0);
 
   const heatmapStats = useMemo(() => {
-    const yearTx = allTx.filter(tx => tx.type === "expense" && new Date(tx.date).getFullYear() === heatmapYear);
-    const total = yearTx.reduce((s, tx) => s + tx.amount, 0);
+    const yearTx = allTx.filter(tx => new Date(tx.date).getFullYear() === heatmapYear);
     const byDay = {};
-    yearTx.forEach(tx => { byDay[tx.date] = (byDay[tx.date] || 0) + tx.amount; });
+    let total = 0;
+
+    if (heatmapMode === "expense") {
+      yearTx.filter(tx => tx.type === "expense").forEach(tx => {
+        byDay[tx.date] = (byDay[tx.date] || 0) + tx.amount;
+        total += tx.amount;
+      });
+    } else if (heatmapMode === "income") {
+      yearTx.filter(tx => tx.type === "income").forEach(tx => {
+        byDay[tx.date] = (byDay[tx.date] || 0) + tx.amount;
+        total += tx.amount;
+      });
+    } else {
+      // net : revenus - dépenses (transferts ignorés)
+      yearTx.forEach(tx => {
+        if (tx.type === "income") { byDay[tx.date] = (byDay[tx.date] || 0) + tx.amount; total += tx.amount; }
+        else if (tx.type === "expense") { byDay[tx.date] = (byDay[tx.date] || 0) - tx.amount; total -= tx.amount; }
+      });
+    }
+
     const days = Object.keys(byDay);
     const daysWithExp = days.length;
-    const maxDay = days.reduce((max, d) => byDay[d] > (byDay[max] || 0) ? d : max, days[0]);
+    // Pour le mode net, "max" = jour avec la plus grosse magnitude
+    const maxDay = heatmapMode === "net"
+      ? days.reduce((max, d) => Math.abs(byDay[d]) > Math.abs(byDay[max] || 0) ? d : max, days[0])
+      : days.reduce((max, d) => byDay[d] > (byDay[max] || 0) ? d : max, days[0]);
     const avgPerDay = daysWithExp > 0 ? total / daysWithExp : 0;
     return { total, daysWithExp, maxDay, maxDayAmount: maxDay ? byDay[maxDay] : 0, avgPerDay };
-  }, [allTx, heatmapYear]);
+  }, [allTx, heatmapYear, heatmapMode]);
 
   const selectedDayTx = useMemo(() => {
     if (!heatmapSelectedDate) return [];
@@ -522,6 +679,88 @@ export default function App() {
     yearsSet.add(new Date().getFullYear());
     return [...yearsSet].sort((a, b) => b - a);
   }, [transactions]);
+
+  // ─── INSIGHTS AUTOMATIQUES (détection de patterns) ───
+  const autoInsights = useMemo(() => {
+    const out = [];
+    const today = new Date();
+    const todayKey = dkey(today);
+    const yesterdayKey = dkey(new Date(today.getTime() - 86400000));
+
+    // 1. Pas de tx hier ?
+    const hasYesterday = transactions.some(t => t.date === yesterdayKey);
+    if (!hasYesterday && transactions.length > 5) {
+      out.push({ id: "no_track_yesterday", icon: "📅", text: "Tu n'as rien tracké hier — tout va bien ?", color: vio });
+    }
+
+    // 2. Détection doublons abos ce mois (même nom de sub débité 2x)
+    const monthExpenses = allTx.filter(tx => mkey(tx.date) === month && tx.type === "expense");
+    const subCounts = {};
+    monthExpenses.filter(tx => tx.is_recurring).forEach(tx => {
+      const name = (tx.note || "").replace("🔄 ", "").trim();
+      if (!name) return;
+      subCounts[name] = (subCounts[name] || 0) + 1;
+    });
+    Object.entries(subCounts).forEach(([name, count]) => {
+      if (count > 1) {
+        out.push({ id: `dup_sub_${name}`, icon: "⚠️", text: `${name} a été débité ${count} fois ce mois`, color: red });
+      }
+    });
+
+    // 3. Comparaison catégories cette semaine vs les 3 dernières (hors actuelle)
+    const weekStart = new Date(today); weekStart.setDate(today.getDate() - 6);
+    const weekTx = allTx.filter(tx => {
+      const d = new Date(tx.date);
+      return tx.type === "expense" && d >= weekStart && d <= today;
+    });
+    const weekByCat = {};
+    weekTx.forEach(tx => { weekByCat[tx.category] = (weekByCat[tx.category] || 0) + tx.amount; });
+
+    const refStart = new Date(today); refStart.setDate(today.getDate() - 28);
+    const refEnd = new Date(today); refEnd.setDate(today.getDate() - 7);
+    const refTx = allTx.filter(tx => {
+      const d = new Date(tx.date);
+      return tx.type === "expense" && d >= refStart && d <= refEnd;
+    });
+    const refByCatAvg = {};
+    EXP_CATS.forEach(c => {
+      const total = refTx.filter(tx => tx.category === c.id).reduce((s, tx) => s + tx.amount, 0);
+      refByCatAvg[c.id] = total / 3; // moyenne sur 3 semaines
+    });
+
+    EXP_CATS.forEach(c => {
+      const wk = weekByCat[c.id] || 0;
+      const avg = refByCatAvg[c.id] || 0;
+      if (wk > 50 && avg > 0 && wk > avg * 1.8) { // au moins +80% et au moins 50€
+        const pct = Math.round(((wk - avg) / avg) * 100);
+        out.push({ id: `cat_spike_${c.id}`, icon: c.emoji, text: `+${pct}% en ${c.name} cette semaine vs habitude`, color: red });
+      }
+    });
+
+    // 4. Objectif proche d'un palier 10%
+    const nextMilestone = Math.ceil(goalPct / 10) * 10;
+    const remaining = ((nextMilestone / 100) * goal) - totalEur;
+    if (remaining > 0 && remaining < 2000 && nextMilestone <= 100) {
+      out.push({ id: `goal_near_${nextMilestone}`, icon: "🎯", text: `Plus que ${fmt(remaining)} pour atteindre ${nextMilestone}% de ton objectif`, color: vioBright });
+    }
+
+    // 5. Mois quasi terminé sans dépense Elea (purement fun)
+    const dayOfMonth = today.getDate();
+    const [, mNum] = month.split("-").map(Number);
+    const isThisMonth = mkey(today) === month;
+    if (isThisMonth && dayOfMonth > 25 && eleaTotal === 0) {
+      out.push({ id: "no_elea", icon: "💕", text: "Aucune dépense Elea ce mois — tout va bien ?", color: "#f472b6" });
+    }
+
+    // Filtrer les insights fermés
+    return out.filter(i => !dismissedInsights.has(i.id));
+  }, [allTx, transactions, month, goalPct, goal, totalEur, eleaTotal, dismissedInsights]);
+
+  const dismissInsight = (id) => {
+    setDismissedInsights(prev => {
+      const next = new Set(prev); next.add(id); return next;
+    });
+  };
 
   const shiftMonth = (d) => { const [y, m] = month.split("-").map(Number); setMonth(mkey(new Date(y, m - 1 + d, 1))); };
 
@@ -540,22 +779,60 @@ export default function App() {
       if (f.type === "income") tx.inc_category = f.incCategory;
       if (f.type === "transfer") { tx.to = f.to; const fees = parseFloat(f.fees) || 0; if (fees > 0) tx.fees = fees; }
       await supabase.from('transactions').insert(tx);
+
+      // Si dépense + catégorie Abo + case cochée → créer l'abonnement récurrent
+      if (f.type === "expense" && f.category === "abonnement" && f.makeRecurring && f.note) {
+        const dayOfMonth = new Date(f.date).getDate();
+        await supabase.from('subscriptions').insert({
+          id: uid(),
+          name: f.note.replace(/^🔄\s*/, ""), // au cas où il a un emoji déjà
+          amount,
+          platform: f.platform,
+          day: dayOfMonth,
+          active: true,
+          start_date: f.date,
+        });
+      }
+
+      // Sons
+      if (f.type === "expense") playExpenseClick(muted);
+      else if (f.type === "income") playCashRegister(muted);
+      else if (f.type === "transfer") playSwoosh(muted);
     }
-    setF(p => ({ ...p, amount: "", note: "", fees: "" })); setModal(null);
+    setF(p => ({ ...p, amount: "", note: "", fees: "", makeRecurring: true })); setModal(null);
     await loadAll();
   };
 
   const startEdit = (tx) => {
-    setF({ type: tx.type, amount: String(tx.amount), platform: tx.platform, category: tx.category || "quotidien", incCategory: tx.inc_category || "rainbet_video", note: tx.note || "", date: tx.date, to: tx.to || "phantom", fees: tx.fees ? String(tx.fees) : "" });
+    setF({ type: tx.type, amount: String(tx.amount), platform: tx.platform, category: tx.category || "quotidien", incCategory: tx.inc_category || "rainbet_video", note: tx.note || "", date: tx.date, to: tx.to || "phantom", fees: tx.fees ? String(tx.fees) : "", makeRecurring: false, day: 1 });
     setEditTx(tx.id); setModal("tx");
+  };
+
+  // Dupliquer : ouvre le modal pré-rempli avec même date + montant + plateforme + catégorie, mais note vidée
+  const duplicateTx = (tx) => {
+    setF({
+      type: tx.type,
+      amount: String(tx.amount),
+      platform: tx.platform,
+      category: tx.category || "quotidien",
+      incCategory: tx.inc_category || "rainbet_video",
+      note: "", // note vidée comme demandé
+      date: tx.date, // même date que l'original
+      to: tx.to || "phantom",
+      fees: tx.fees ? String(tx.fees) : "",
+      makeRecurring: false,
+      day: 1,
+    });
+    setEditTx(null); // pas en mode édition, c'est une nouvelle transaction
+    setModal("tx");
   };
   const redoLast = () => {
     if (!lastTx) return;
-    setF({ type: lastTx.type, amount: String(lastTx.amount), platform: lastTx.platform, category: lastTx.category || "quotidien", incCategory: lastTx.inc_category || "rainbet_video", note: lastTx.note || "", date: new Date().toISOString().split("T")[0], to: lastTx.to || "phantom", fees: lastTx.fees ? String(lastTx.fees) : "" });
+    setF({ type: lastTx.type, amount: String(lastTx.amount), platform: lastTx.platform, category: lastTx.category || "quotidien", incCategory: lastTx.inc_category || "rainbet_video", note: lastTx.note || "", date: new Date().toISOString().split("T")[0], to: lastTx.to || "phantom", fees: lastTx.fees ? String(lastTx.fees) : "", makeRecurring: false, day: 1 });
     setEditTx(null); setModal("tx");
   };
 
-  const del = async (id) => { await supabase.from('transactions').delete().eq('id', id); setConfirmDel(null); await loadAll(); };
+  const del = async (id) => { await supabase.from('transactions').delete().eq('id', id); setConfirmDel(null); playDelete(muted); await loadAll(); };
   const saveBal = async (pid) => {
     const val = parseFloat(editBalVal) || 0;
     await supabase.from('initial_balances').upsert({ platform: pid, amount: val });
@@ -635,6 +912,13 @@ export default function App() {
           <div style={{ fontWeight: 600, fontSize: 13, color: isInc ? green : isTr ? purple : red }}>
             {isInc ? "+" : isTr ? "" : "-"}{fmt2(tx.amount)}
           </div>
+          {!isRec && (tx.type === "expense" || tx.type === "income") && (
+            <button onClick={(e) => { e.stopPropagation(); duplicateTx(tx); }}
+              title="Dupliquer cette transaction"
+              style={{ background: "none", border: "none", color: vio + "60", cursor: "pointer", fontSize: 12, padding: 2 }}>
+              📋
+            </button>
+          )}
           {!isRec && (confirmDel === tx.id ? (
             <div style={{ display: "flex", gap: 3 }}>
               <button onClick={() => del(tx.id)} style={{ background: red, border: "none", borderRadius: 5, color: "#fff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Oui</button>
@@ -676,6 +960,24 @@ export default function App() {
         <MonthSwitcher size={isDesktop ? "big" : "normal"} />
 
         {insight && <div style={{ padding: "8px 14px", marginBottom: isDesktop ? 14 : 8, borderRadius: 10, background: insight.color + "10", border: `1px solid ${insight.color}20`, fontSize: 12, color: insight.color, fontWeight: 500, textAlign: "center" }}>{insight.text}</div>}
+
+        {/* PANNEAU INSIGHTS AUTOMATIQUES */}
+        {autoInsights.length > 0 && (
+          <div style={{ marginBottom: isDesktop ? 14 : 10, display: "flex", flexDirection: "column", gap: 6 }}>
+            {autoInsights.map(ins => (
+              <div key={ins.id} style={{
+                padding: "10px 14px", borderRadius: 10,
+                background: ins.color + "10", border: `1px solid ${ins.color}25`,
+                display: "flex", alignItems: "center", gap: 10,
+                boxShadow: `0 0 14px ${ins.color}08`,
+              }}>
+                <span style={{ fontSize: 16 }}>{ins.icon}</span>
+                <span style={{ flex: 1, fontSize: 12, color: ins.color, fontWeight: 500 }}>{ins.text}</span>
+                <button onClick={() => dismissInsight(ins.id)} style={{ background: "none", border: "none", color: ins.color + "70", cursor: "pointer", fontSize: 14, padding: 2 }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {isDesktop ? (
           // ─── DESKTOP HOME : 2 colonnes ───
@@ -1002,8 +1304,8 @@ export default function App() {
 
       {/* HEATMAP */}
       {tab === "heatmap" && (<>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>📅 Heatmap des dépenses</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+          <div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>📅 Heatmap</div>
           <div style={{ display: "flex", gap: 5 }}>
             {availableYears.map(y => (
               <button key={y} onClick={() => { setHeatmapYear(y); setHeatmapSelectedDate(null); }} style={pill(heatmapYear === y)}>{y}</button>
@@ -1011,10 +1313,24 @@ export default function App() {
           </div>
         </div>
 
+        {/* TOGGLE MODE : Dépenses / Revenus / Net */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          <button onClick={() => { setHeatmapMode("expense"); setHeatmapSelectedDate(null); }}
+            style={pill(heatmapMode === "expense", red)}>📤 Dépenses</button>
+          <button onClick={() => { setHeatmapMode("income"); setHeatmapSelectedDate(null); }}
+            style={pill(heatmapMode === "income", green)}>📥 Revenus</button>
+          <button onClick={() => { setHeatmapMode("net"); setHeatmapSelectedDate(null); }}
+            style={pill(heatmapMode === "net", vio)}>⚖️ Net (bénéfice/déficit)</button>
+        </div>
+
         <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "repeat(4, 1fr)" : "1fr 1fr", gap: 10, marginBottom: 12 }}>
           <G style={{ padding: "12px 14px" }}>
-            <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Total {heatmapYear}</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: red }}>{fmt(heatmapStats.total)}</div>
+            <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>
+              {heatmapMode === "expense" ? `Dépenses ${heatmapYear}` : heatmapMode === "income" ? `Revenus ${heatmapYear}` : `Net ${heatmapYear}`}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: heatmapMode === "expense" ? red : heatmapMode === "income" ? green : (heatmapStats.total >= 0 ? green : red) }}>
+              {heatmapMode === "net" && heatmapStats.total >= 0 ? "+" : ""}{fmt(heatmapStats.total)}
+            </div>
           </G>
           <G style={{ padding: "12px 14px" }}>
             <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Jours actifs</div>
@@ -1025,7 +1341,9 @@ export default function App() {
             <div style={{ fontSize: 20, fontWeight: 700, color: t1 }}>{fmt(heatmapStats.avgPerDay)}</div>
           </G>
           <G style={{ padding: "12px 14px", cursor: heatmapStats.maxDay ? "pointer" : "default" }} onClick={() => heatmapStats.maxDay && setHeatmapSelectedDate(heatmapStats.maxDay)}>
-            <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>Pire journée</div>
+            <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1 }}>
+              {heatmapMode === "expense" ? "Pire journée" : heatmapMode === "income" ? "Meilleure journée" : "Top journée"}
+            </div>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#fbbf24" }}>
               {heatmapStats.maxDay ? `${new Date(heatmapStats.maxDay).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} • ${fmt(heatmapStats.maxDayAmount)}` : "—"}
             </div>
@@ -1033,7 +1351,7 @@ export default function App() {
         </div>
 
         <G style={{ padding: 16, marginBottom: 12 }}>
-          <Heatmap allTx={allTx} year={heatmapYear} onCellClick={setHeatmapSelectedDate} selectedDate={heatmapSelectedDate} t2={t2} red={red} />
+          <Heatmap allTx={allTx} year={heatmapYear} onCellClick={setHeatmapSelectedDate} selectedDate={heatmapSelectedDate} t2={t2} mode={heatmapMode} />
         </G>
 
         {heatmapSelectedDate && (
@@ -1159,6 +1477,9 @@ export default function App() {
           </G>
 
           <button onClick={exportCSV} style={{ marginTop: 10, padding: "8px 12px", borderRadius: 10, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", color: t2, fontSize: 11, fontFamily: ff, cursor: "pointer" }}>↓ Export CSV</button>
+          <button onClick={toggleMute} style={{ marginTop: 6, padding: "8px 12px", borderRadius: 10, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", color: muted ? red : t2, fontSize: 11, fontFamily: ff, cursor: "pointer" }}>
+            {muted ? "🔇 Sons coupés" : "🔊 Sons activés"}
+          </button>
         </div>
 
         {/* CONTENU PRINCIPAL DESKTOP */}
@@ -1253,7 +1574,8 @@ export default function App() {
         {[["home","Accueil"],["details","Détails"],["chart","Évolution"],["heatmap","📅 Heatmap"],["subs","Abos"],["refunds","💸 Remb."]].map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)} style={pill(tab === k)}>{l}</button>
         ))}
-        <button onClick={exportCSV} style={{ ...pill(false), marginLeft: "auto", fontSize: 11 }}>↓ CSV</button>
+        <button onClick={toggleMute} style={{ ...pill(false), marginLeft: "auto", fontSize: 11, color: muted ? red : t2 }}>{muted ? "🔇" : "🔊"}</button>
+        <button onClick={exportCSV} style={{ ...pill(false), fontSize: 11 }}>↓ CSV</button>
       </div>
 
       <div style={{ padding: "0 16px" }}>
@@ -1337,6 +1659,30 @@ export default function App() {
                         <span style={{ fontSize: 17 }}>{c.emoji}</span>{c.name}
                       </button>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* CASE À COCHER ABO RÉCURRENT (uniquement si dépense + catégorie abo + pas en mode édition) */}
+              {f.type === "expense" && f.category === "abonnement" && !editTx && (
+                <div onClick={() => uf("makeRecurring", !f.makeRecurring)}
+                  style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 10, background: f.makeRecurring ? vio + "10" : "rgba(255,255,255,0.025)", border: `1px solid ${f.makeRecurring ? vio + "35" : "rgba(255,255,255,0.06)"}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 5,
+                    border: `1.5px solid ${f.makeRecurring ? vio : t2}`,
+                    background: f.makeRecurring ? vio : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    color: "#fff", fontSize: 13, fontWeight: 700,
+                  }}>
+                    {f.makeRecurring && "✓"}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: f.makeRecurring ? vio : t1 }}>🔄 En faire un abonnement récurrent</div>
+                    <div style={{ fontSize: 10, color: f.makeRecurring && !f.note ? "#fbbf24" : t2, marginTop: 2 }}>
+                      {f.makeRecurring
+                        ? (f.note ? `Sera débité auto chaque ${new Date(f.date).getDate()} du mois` : "⚠️ Ajoute une note (nom de l'abo) pour activer")
+                        : "One-shot, pas de récurrence"}
+                    </div>
                   </div>
                 </div>
               )}
