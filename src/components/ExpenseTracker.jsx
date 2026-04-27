@@ -403,13 +403,23 @@ function SankeyDiagram({ allTx, period, t1, t2, vio, green, red, purple }) {
       Object.keys(transfers).some(k => k.startsWith(p.id + "->") || k.endsWith("->" + p.id))
     );
     activePlatforms.forEach(p => {
+      // Calculer le total entrant (revenus + transferts reçus)
+      const transfersIn = Object.entries(transfers)
+        .filter(([k]) => k.endsWith("->" + p.id))
+        .reduce((s, [, v]) => s + v, 0);
+      // Calculer le total sortant (dépenses + transferts envoyés)
+      const transfersOut = Object.entries(transfers)
+        .filter(([k]) => k.startsWith(p.id + "->"))
+        .reduce((s, [, v]) => s + v, 0);
+      const totalIn = (accountIn[p.id] || 0) + transfersIn;
+      const totalOutForNode = (accountOut[p.id] || 0) + transfersOut;
       nodeMap[`acc_${p.id}`] = nodes.length;
       nodes.push({
         id: `acc_${p.id}`,
         label: p.name,
         icon: p.icon,
         color: p.color,
-        value: Math.max(accountIn[p.id] || 0, accountOut[p.id] || 0),
+        value: Math.max(totalIn, totalOutForNode),
         col: 1,
       });
     });
