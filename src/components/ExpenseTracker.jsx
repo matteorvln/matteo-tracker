@@ -25,6 +25,7 @@ const EXP_CATS = [
   { id: "sante", name: "Santé", emoji: "🏥", color: "#34d399" },
   { id: "logement", name: "Logement", emoji: "🏠", color: "#fbbf24" },
   { id: "assurance", name: "Assurance", emoji: "🛡️", color: "#60a5fa" },
+  { id: "inconnu", name: "Inconnu", emoji: "❓", color: "#facc15" },
 ];
 
 const INC_CATS = [
@@ -767,6 +768,7 @@ export default function App() {
   const [sortBy, setSortBy] = useState("date");
   const [editTx, setEditTx] = useState(null);
   const [eleaFilter, setEleaFilter] = useState(false);
+  const [inconnuFilter, setInconnuFilter] = useState(false);
   const [refundForm, setRefundForm] = useState({ label: "", amount: "", date: new Date().toISOString().split("T")[0] });
   const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
   const [heatmapSelectedDate, setHeatmapSelectedDate] = useState(null);
@@ -856,6 +858,7 @@ export default function App() {
     let txs = allTx.filter(tx => mkey(tx.date) === month);
     if (pFilter !== "all") txs = txs.filter(tx => tx.platform === pFilter || tx.to === pFilter);
     if (eleaFilter) txs = txs.filter(tx => (tx.note || "").toLowerCase().includes("elea"));
+    if (inconnuFilter) txs = txs.filter(tx => tx.category === "inconnu");
     if (txTypeFilter !== "all") txs = txs.filter(tx => tx.type === txTypeFilter);
     if (search) {
       const q = search.toLowerCase();
@@ -868,7 +871,7 @@ export default function App() {
     if (sortBy === "amount_desc") return txs.sort((a, b) => b.amount - a.amount);
     if (sortBy === "amount_asc") return txs.sort((a, b) => a.amount - b.amount);
     return txs.sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [allTx, month, pFilter, search, sortBy, eleaFilter, txTypeFilter]);
+  }, [allTx, month, pFilter, search, sortBy, eleaFilter, txTypeFilter, inconnuFilter]);
 
   const stats = useMemo(() => {
     let inc = 0, exp = 0; const bc = {}, ic = {};
@@ -981,6 +984,13 @@ export default function App() {
 
   const eleaTotal = useMemo(() => {
     return allTx.filter(tx => mkey(tx.date) === month && (tx.note || "").toLowerCase().includes("elea")).reduce((s, tx) => s + tx.amount, 0);
+  }, [allTx, month]);
+
+  // Stats des transactions "Inconnu" à vérifier
+  const inconnuStats = useMemo(() => {
+    const txs = allTx.filter(tx => mkey(tx.date) === month && tx.type === "expense" && tx.category === "inconnu");
+    const total = txs.reduce((s, tx) => s + tx.amount, 0);
+    return { count: txs.length, total };
   }, [allTx, month]);
 
   const chartData = useMemo(() => {
@@ -1386,6 +1396,7 @@ export default function App() {
                 {totalSubsMonth > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>📱 Abos</div><div style={{ fontSize: 13, fontWeight: 600, color: vio }}>{fmt(totalSubsMonth)}/mois</div></G>}
                 {eleaTotal > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>💕 Elea</div><div style={{ fontSize: 13, fontWeight: 600, color: "#f472b6" }}>{fmt(eleaTotal)}</div></G>}
                 {totalPendingRefunds > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }} onClick={() => setTab("refunds")}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>💸 Remb.</div><div style={{ fontSize: 13, fontWeight: 600, color: "#fbbf24" }}>{fmt(totalPendingRefunds)}</div></G>}
+                {inconnuStats.count > 0 && <G glow="#facc15" style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center", border: "1px solid #facc1540" }} onClick={() => setInconnuFilter(true)}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>❓ À vérifier</div><div style={{ fontSize: 13, fontWeight: 600, color: "#facc15" }}>{inconnuStats.count} tx · {fmt(inconnuStats.total)}</div></G>}
               </div>
 
               {/* Mini donut dépenses */}
@@ -1426,6 +1437,7 @@ export default function App() {
                   {txTypeFilter === "all" ? "Tout" : txTypeFilter === "income" ? "📥 Rentrées" : "📤 Sorties"}
                 </button>
                 <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "6px 12px", fontSize: 11 }}>💕 Elea</button>
+                <button onClick={() => setInconnuFilter(!inconnuFilter)} style={{ ...pill(inconnuFilter, "#facc15"), padding: "6px 12px", fontSize: 11 }}>❓ Inconnu</button>
                 <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
                   <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "6px 10px", fontSize: 11 }}>Tout</button>
                   {PLATFORMS.map(p => <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "6px 10px", fontSize: 11 }} title={p.name}>{p.icon}</button>)}
@@ -1457,10 +1469,11 @@ export default function App() {
               <span style={{ fontSize: 24, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : "-"}{fmt(stats.net)}</span>
             </G>
 
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               {totalSubsMonth > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }}><span style={{ fontSize: 10, color: t2 }}>📱 Abos : </span><span style={{ fontSize: 12, fontWeight: 600, color: vio }}>{fmt(totalSubsMonth)}/mois</span></G>}
               {eleaTotal > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }}><span style={{ fontSize: 10, color: t2 }}>💕 Elea : </span><span style={{ fontSize: 12, fontWeight: 600, color: "#f472b6" }}>{fmt(eleaTotal)}</span></G>}
               {totalPendingRefunds > 0 && <G style={{ padding: "8px 12px", flex: 1, textAlign: "center" }} onClick={() => setTab("refunds")}><span style={{ fontSize: 10, color: t2 }}>💸 Remb : </span><span style={{ fontSize: 12, fontWeight: 600, color: "#fbbf24" }}>{fmt(totalPendingRefunds)}</span></G>}
+              {inconnuStats.count > 0 && <G glow="#facc15" style={{ padding: "8px 12px", flex: 1, textAlign: "center", border: "1px solid #facc1540" }} onClick={() => setInconnuFilter(true)}><span style={{ fontSize: 10, color: t2 }}>❓ Vérifier : </span><span style={{ fontSize: 12, fontWeight: 600, color: "#facc15" }}>{inconnuStats.count} ({fmt(inconnuStats.total)})</span></G>}
             </div>
 
             <div style={{ display: "flex", gap: 5, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -1477,6 +1490,7 @@ export default function App() {
                 {txTypeFilter === "all" ? "Type" : txTypeFilter === "income" ? "📥" : "📤"}
               </button>
               <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "5px 10px", fontSize: 11 }}>💕</button>
+              <button onClick={() => setInconnuFilter(!inconnuFilter)} style={{ ...pill(inconnuFilter, "#facc15"), padding: "5px 10px", fontSize: 11 }}>❓</button>
               <div style={{ display: "flex", gap: 3, overflowX: "auto", scrollbarWidth: "none" }}>
                 <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "5px 8px", fontSize: 10 }}>Tout</button>
                 {PLATFORMS.map(p => <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "5px 8px", fontSize: 10 }}>{p.icon}</button>)}
