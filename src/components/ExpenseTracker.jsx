@@ -31,6 +31,7 @@ const EXP_CATS = [
 const INC_CATS = [
   { id: "celsius", name: "Celsius", emoji: "🎰", color: "#fbbf24" },
   { id: "rainbet_video", name: "Rainbet", emoji: "🎬", color: "#34d399" },
+  { id: "casino_pompette", name: "Casino Pompette", emoji: "🍻", color: "#f59e0b" },
   { id: "youtube", name: "YouTube", emoji: "▶️", color: "#ef4444" },
   { id: "mobilfox", name: "Mobilfox", emoji: "📱", color: "#818cf8" },
   { id: "tiktok_fr", name: "TikTok FR", emoji: "🇫🇷", color: "#f87171" },
@@ -42,6 +43,7 @@ const INC_CATS = [
 ];
 
 const GOAL = 200000;
+const TARGET_DATE = new Date(2026, 11, 31); // 31 décembre 2026
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const fmt = (n) => `${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}€`;
 const fmtSigned = (n) => `${n < 0 ? "-" : ""}${Math.abs(n).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}€`;
@@ -848,6 +850,56 @@ export default function App() {
   const totalEur = useMemo(() => PLATFORMS.reduce((s, p) => s + (balances[p.id] || 0), 0), [balances]);
   const goalPct = Math.min(Math.max((totalEur / (goal || GOAL)) * 100, 0), 100);
 
+  // Calcul de la trajectoire patrimoine pondérée (mois récents = plus de poids)
+  const trajectory = useMemo(() => {
+    // On regarde les 6 derniers mois et on calcule un net pondéré
+    const months = [];
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(); d.setMonth(d.getMonth() - i);
+      const mk = mkey(d);
+      let inc = 0, exp = 0;
+      allTx.filter(tx => mkey(tx.date) === mk).forEach(tx => {
+        if (tx.type === "income") inc += tx.amount;
+        if (tx.type === "expense") exp += tx.amount;
+      });
+      const net = inc - exp;
+      const hasData = inc > 0 || exp > 0;
+      months.push({ mk, net, hasData });
+    }
+
+    // Pondération : mois 0 (actuel) = 6, mois 1 = 5, ... mois 5 = 1
+    // Mais on ignore les mois sans data
+    const monthsWithData = months.filter(m => m.hasData);
+    if (monthsWithData.length === 0) {
+      return { avgMonthlyNet: 0, projectedAtTarget: totalEur, gap: 0, monthsLeft: 0, neededMonthly: 0, isOnTrack: false };
+    }
+
+    let weightSum = 0, netSum = 0;
+    monthsWithData.forEach((m, i) => {
+      // Trouver l'index original pour le poids
+      const originalIdx = months.indexOf(m);
+      const weight = 6 - originalIdx;
+      weightSum += weight;
+      netSum += m.net * weight;
+    });
+    const avgMonthlyNet = weightSum > 0 ? netSum / weightSum : 0;
+
+    // Calcul des mois restants jusqu'au 31/12/2026
+    const today = new Date();
+    const monthsLeft = Math.max(0, (TARGET_DATE.getFullYear() - today.getFullYear()) * 12 + (TARGET_DATE.getMonth() - today.getMonth()));
+
+    // Projection : où serai-je à la date cible si je continue au rythme actuel ?
+    const projectedAtTarget = totalEur + (avgMonthlyNet * monthsLeft);
+
+    // Le rythme nécessaire pour atteindre l'objectif (par défaut 250k€)
+    const targetGoal = 250000;
+    const gap = targetGoal - projectedAtTarget;
+    const neededMonthly = monthsLeft > 0 ? (targetGoal - totalEur) / monthsLeft : 0;
+    const isOnTrack = projectedAtTarget >= targetGoal;
+
+    return { avgMonthlyNet, projectedAtTarget, gap, monthsLeft, neededMonthly, isOnTrack, targetGoal };
+  }, [allTx, totalEur]);
+
   useEffect(() => {
     if (!loaded) return;
     const prev = prevPctRef.current;
@@ -1440,6 +1492,57 @@ export default function App() {
           </div>
         )}
 
+        {/* CARD TRAJECTOIRE PATRIMOINE → 250k€ AU 31/12/2026 */}
+        {trajectory.monthsLeft > 0 && trajectory.avgMonthlyNet !== 0 && (
+          <G glow={trajectory.isOnTrack ? green : "#fbbf24"} style={{ padding: isDesktop ? "16px 20px" : "14px 16px", marginBottom: isDesktop ? 16 : 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 4 }}>🎯 Trajectoire vers 250k€</div>
+                <div style={{ fontSize: 13, color: t1, fontWeight: 500 }}>au 31/12/2026 · dans {trajectory.monthsLeft} mois</div>
+              </div>
+              <div style={{
+                padding: "5px 10px", borderRadius: 8,
+                background: (trajectory.isOnTrack ? green : "#fbbf24") + "15",
+                border: `1px solid ${(trajectory.isOnTrack ? green : "#fbbf24")}40`,
+                color: trajectory.isOnTrack ? green : "#fbbf24",
+                fontSize: 11, fontWeight: 700,
+              }}>
+                {trajectory.isOnTrack ? "✅ Sur les rails" : "⚠️ En retard"}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr 1fr" : "1fr", gap: 10 }}>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>📈 À ce rythme</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: trajectory.isOnTrack ? green : "#fbbf24" }}>
+                  {fmt(trajectory.projectedAtTarget)}
+                </div>
+                <div style={{ fontSize: 10, color: t2, marginTop: 2 }}>
+                  {trajectory.isOnTrack
+                    ? `+${fmt(-trajectory.gap)} au-dessus 🎉`
+                    : `-${fmt(trajectory.gap)} en dessous`}
+                </div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>💰 Net moyen actuel</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: trajectory.avgMonthlyNet >= 0 ? green : red }}>
+                  {trajectory.avgMonthlyNet >= 0 ? "+" : "-"}{fmt(Math.abs(trajectory.avgMonthlyNet))}
+                </div>
+                <div style={{ fontSize: 10, color: t2, marginTop: 2 }}>par mois (pondéré)</div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: `1px solid ${vio}30` }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>🎯 Rythme nécessaire</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: vioBright }}>
+                  {fmt(trajectory.neededMonthly)}
+                </div>
+                <div style={{ fontSize: 10, color: t2, marginTop: 2 }}>
+                  par mois pour atteindre 250k€
+                </div>
+              </div>
+            </div>
+          </G>
+        )}
+
         {isDesktop ? (
           // ─── DESKTOP HOME : 2 colonnes ───
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 18 }}>
@@ -1747,6 +1850,93 @@ export default function App() {
           <button onClick={() => setChartView("monthly")} style={pill(chartView === "monthly")}>Mois</button>
           <button onClick={() => setChartView("yearly")} style={pill(chartView === "yearly")}>Année</button>
         </div>
+
+        {/* GRAPHIQUE TRAJECTOIRE 250k€ */}
+        {trajectory.monthsLeft > 0 && (() => {
+          // Construire les données : passé (réel) + futur (projeté + idéal)
+          const data = [];
+          // Passé : 6 derniers mois de patrimoine réel
+          let running = PLATFORMS.reduce((s, p) => s + (initialBalances[p.id] || 0), 0);
+          for (let i = 11; i >= 0; i--) {
+            const d = new Date(); d.setMonth(d.getMonth() - i);
+            const mk = mkey(d);
+            allTx.filter(tx => mkey(tx.date) === mk).forEach(tx => {
+              if (tx.type === "income") running += tx.amount;
+              if (tx.type === "expense") running -= tx.amount;
+            });
+            data.push({
+              name: mshort(mk) + " " + mk.slice(2, 4),
+              reel: Math.round(running),
+              projete: null,
+              ideal: null,
+            });
+          }
+          // Présent : on ajoute la dernière valeur réelle aussi en projete et ideal pour relier les courbes
+          const lastReal = data[data.length - 1].reel;
+          data[data.length - 1].projete = lastReal;
+          data[data.length - 1].ideal = lastReal;
+
+          // Futur : on projette mois par mois jusqu'à décembre 2026
+          const today = new Date();
+          let projectedRunning = lastReal;
+          // Trajectoire idéale : ligne droite vers 250k€
+          const idealStartValue = lastReal;
+          const idealEndValue = 250000;
+          const totalMonthsToTarget = trajectory.monthsLeft;
+
+          for (let i = 1; i <= trajectory.monthsLeft; i++) {
+            const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
+            const mk = mkey(d);
+            projectedRunning += trajectory.avgMonthlyNet;
+            const idealValue = idealStartValue + (idealEndValue - idealStartValue) * (i / totalMonthsToTarget);
+            data.push({
+              name: mshort(mk) + " " + mk.slice(2, 4),
+              reel: null,
+              projete: Math.round(projectedRunning),
+              ideal: Math.round(idealValue),
+            });
+          }
+
+          return (
+            <G glow={trajectory.isOnTrack ? green : "#fbbf24"} style={{ padding: isDesktop ? "18px 12px 12px" : "14px 8px 8px", marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingLeft: 8, paddingRight: 8, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>🎯 Trajectoire vers 250k€</div>
+                <div style={{ display: "flex", gap: 12, fontSize: 10, color: t2 }}>
+                  <span><span style={{ display: "inline-block", width: 12, height: 2, background: vio, marginRight: 4, verticalAlign: "middle" }}></span>Réel</span>
+                  <span><span style={{ display: "inline-block", width: 12, height: 2, background: trajectory.isOnTrack ? green : "#fbbf24", marginRight: 4, verticalAlign: "middle", borderTop: `1px dashed ${trajectory.isOnTrack ? green : "#fbbf24"}` }}></span>Projeté</span>
+                  <span><span style={{ display: "inline-block", width: 12, height: 2, background: vioBright, marginRight: 4, verticalAlign: "middle", borderTop: `1px dashed ${vioBright}` }}></span>Idéal</span>
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={isDesktop ? 280 : 220}>
+                <AreaChart data={data}>
+                  <defs>
+                    <linearGradient id="rg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={vio} stopOpacity={0.3} /><stop offset="100%" stopColor={vio} stopOpacity={0} /></linearGradient>
+                    <linearGradient id="prg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={trajectory.isOnTrack ? green : "#fbbf24"} stopOpacity={0.2} /><stop offset="100%" stopColor={trajectory.isOnTrack ? green : "#fbbf24"} stopOpacity={0} /></linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
+                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} interval={isDesktop ? 1 : 2} />
+                  <YAxis tick={{ fontSize: 10, fill: t2, fontFamily: ff }} axisLine={false} tickLine={false} width={55} />
+                  <Tooltip contentStyle={tipStyle} formatter={(value) => value !== null ? fmt(value) : "—"} />
+                  <Area type="monotone" dataKey="reel" stroke={vio} fill="url(#rg)" strokeWidth={2.5} connectNulls={false} />
+                  <Area type="monotone" dataKey="projete" stroke={trajectory.isOnTrack ? green : "#fbbf24"} fill="url(#prg)" strokeWidth={2} strokeDasharray="6 4" connectNulls={false} />
+                  <Area type="monotone" dataKey="ideal" stroke={vioBright} fill="none" strokeWidth={1.5} strokeDasharray="3 3" connectNulls={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+              <div style={{ padding: "10px 14px 0", display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr 1fr" : "1fr", gap: 8 }}>
+                <div style={{ fontSize: 11, color: t2 }}>
+                  📈 Projection au 31/12/2026 : <span style={{ color: trajectory.isOnTrack ? green : "#fbbf24", fontWeight: 600 }}>{fmt(trajectory.projectedAtTarget)}</span>
+                </div>
+                <div style={{ fontSize: 11, color: t2 }}>
+                  💰 Net moyen : <span style={{ color: trajectory.avgMonthlyNet >= 0 ? green : red, fontWeight: 600 }}>{trajectory.avgMonthlyNet >= 0 ? "+" : "-"}{fmt(Math.abs(trajectory.avgMonthlyNet))}/mois</span>
+                </div>
+                <div style={{ fontSize: 11, color: t2 }}>
+                  🎯 Rythme nécessaire : <span style={{ color: vioBright, fontWeight: 600 }}>{fmt(trajectory.neededMonthly)}/mois</span>
+                </div>
+              </div>
+            </G>
+          );
+        })()}
+
         <G glow={vio} style={{ padding: isDesktop ? "18px 12px 12px" : "14px 8px 8px", marginBottom: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, paddingLeft: 8 }}>📈 Patrimoine</div>
           <ResponsiveContainer width="100%" height={isDesktop ? 240 : 180}>
