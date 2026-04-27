@@ -781,6 +781,7 @@ export default function App() {
   const [f, setF] = useState({ type: "expense", amount: "", platform: "revolut", category: "quotidien", incCategory: "rainbet_video", note: "", date: new Date().toISOString().split("T")[0], to: "phantom", fees: "", makeRecurring: true, day: 1 });
   const uf = (k, v) => setF(p => ({ ...p, [k]: v }));
   const [sf, setSf] = useState({ name: "", amount: "", platform: "revolut", day: 1 });
+  const [editingSub, setEditingSub] = useState(null); // id de l'abo en cours d'édition
   const usf = (k, v) => setSf(p => ({ ...p, [k]: v }));
 
   const prevPctRef = useRef(0);
@@ -981,6 +982,55 @@ export default function App() {
 
   const subs = subscriptions;
   const totalSubsMonth = subs.filter(s => s.active).reduce((s, sub) => s + sub.amount, 0);
+
+  // Stats riches sur les abos
+  const subsStats = useMemo(() => {
+    const active = subs.filter(s => s.active);
+    const monthly = active.reduce((s, sub) => s + sub.amount, 0);
+    const yearly = monthly * 12;
+    const mostExpensive = active.length > 0 ? active.reduce((m, s) => s.amount > m.amount ? s : m) : null;
+    // Répartition par plateforme
+    const byPlatform = {};
+    active.forEach(s => { byPlatform[s.platform] = (byPlatform[s.platform] || 0) + s.amount; });
+    return { monthly, yearly, mostExpensive, activeCount: active.length, totalCount: subs.length, byPlatform };
+  }, [subs]);
+
+  // Calcul du nombre de jours avant le prochain débit d'un abo
+  const daysUntilNext = (subDay) => {
+    const today = new Date();
+    const todayDay = today.getDate();
+    let nextDate;
+    if (subDay > todayDay) {
+      // Le débit est plus tard ce mois-ci
+      nextDate = new Date(today.getFullYear(), today.getMonth(), subDay);
+    } else if (subDay === todayDay) {
+      return 0; // aujourd'hui
+    } else {
+      // Le débit est passé ce mois-ci, donc le prochain est le mois prochain
+      nextDate = new Date(today.getFullYear(), today.getMonth() + 1, subDay);
+      // Gérer le cas où le jour n'existe pas dans le mois suivant (ex: 31 février → on prend le dernier jour)
+      const lastDayOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate();
+      if (subDay > lastDayOfNextMonth) {
+        nextDate = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+      }
+    }
+    const diffMs = nextDate.getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    return Math.round(diffMs / (1000 * 60 * 60 * 24));
+  };
+
+  // Couleur selon urgence (vert > 7j, jaune <=7j, orange <=3j, rouge demain/aujourd'hui)
+  const getNextDebitColor = (days) => {
+    if (days <= 1) return red; // aujourd'hui ou demain
+    if (days <= 3) return "#fb923c"; // orange
+    if (days <= 7) return "#facc15"; // jaune
+    return green; // vert si >7j
+  };
+
+  const formatNextDebit = (days) => {
+    if (days === 0) return "Aujourd'hui";
+    if (days === 1) return "Demain";
+    return `Dans ${days}j`;
+  };
 
   const eleaTotal = useMemo(() => {
     return allTx.filter(tx => mkey(tx.date) === month && (tx.note || "").toLowerCase().includes("elea")).reduce((s, tx) => s + tx.amount, 0);
@@ -1233,9 +1283,26 @@ export default function App() {
   };
   const addSub = async () => {
     const a = parseFloat(sf.amount); if (!a || !sf.name) return;
-    await supabase.from('subscriptions').insert({ id: uid(), name: sf.name, amount: a, platform: sf.platform, day: parseInt(sf.day) || 1, active: true, start_date: new Date().toISOString().split("T")[0] });
+    if (editingSub) {
+      // Mode édition
+      await supabase.from('subscriptions').update({
+        name: sf.name, amount: a, platform: sf.platform, day: parseInt(sf.day) || 1
+      }).eq('id', editingSub);
+      setEditingSub(null);
+    } else {
+      // Mode création
+      await supabase.from('subscriptions').insert({ id: uid(), name: sf.name, amount: a, platform: sf.platform, day: parseInt(sf.day) || 1, active: true, start_date: new Date().toISOString().split("T")[0] });
+    }
     setSf({ name: "", amount: "", platform: "revolut", day: 1 }); setModal(null); await loadAll();
   };
+
+  // Démarrer l'édition d'un abo : remplir le formulaire + ouvrir le modal
+  const startEditSub = (sub) => {
+    setSf({ name: sub.name, amount: String(sub.amount), platform: sub.platform, day: sub.day });
+    setEditingSub(sub.id);
+    setModal("sub");
+  };
+
   const toggleSub = async (id) => {
     const s = subs.find(x => x.id === id); if (!s) return;
     await supabase.from('subscriptions').update({ active: !s.active }).eq('id', id); await loadAll();
@@ -1857,30 +1924,76 @@ export default function App() {
 
       {/* SUBS */}
       {tab === "subs" && (<>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div><div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>Abonnements</div><div style={{ fontSize: 12, color: t2 }}>{fmt(totalSubsMonth)}/mois</div></div>
-          <button onClick={() => setModal("sub")} style={{ background: vio + "20", color: vio, border: `1px solid ${vio}40`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>🔄 Abonnements</div>
+            <div style={{ fontSize: 12, color: t2 }}>{subsStats.activeCount} actif{subsStats.activeCount > 1 ? "s" : ""} sur {subsStats.totalCount}</div>
+          </div>
+          <button onClick={() => { setEditingSub(null); setSf({ name: "", amount: "", platform: "revolut", day: 1 }); setModal("sub"); }} style={{ background: vio + "20", color: vio, border: `1px solid ${vio}40`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
         </div>
-        {subs.length === 0 && <G style={{ padding: 28, textAlign: "center" }}><span style={{ color: t2 }}>Aucun abonnement</span></G>}
-        <div style={{ display: isDesktop ? "grid" : "block", gridTemplateColumns: isDesktop ? "1fr 1fr" : undefined, gap: isDesktop ? 8 : 0 }}>
-          {subs.map(s => { const p = PLATFORMS.find(pl => pl.id === s.platform); return (
-            <G key={s.id} style={{ padding: "12px 14px", marginBottom: isDesktop ? 0 : 5, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: s.active ? 1 : 0.4 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontSize: 12, fontWeight: 500 }}>🔄 {s.name}</span><span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: p?.color + "10", color: p?.color }}>{p?.name}</span></div>
-                <div style={{ fontSize: 10, color: t2 }}>Le {s.day}/mois</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontWeight: 600, fontSize: 13, color: red }}>-{fmt2(s.amount)}</span>
-                <button onClick={() => toggleSub(s.id)} style={{ width: 36, height: 22, borderRadius: 11, border: "none", cursor: "pointer", position: "relative", background: s.active ? green : "rgba(255,255,255,0.06)" }}><div style={{ width: 16, height: 16, borderRadius: 8, background: "#fff", position: "absolute", top: 3, left: s.active ? 17 : 3, transition: "left 0.2s" }} /></button>
-                {confirmDelSub === s.id ? (
-                  <div style={{ display: "flex", gap: 3 }}>
-                    <button onClick={() => delSub(s.id)} style={{ background: red, border: "none", borderRadius: 5, color: "#fff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Oui</button>
-                    <button onClick={() => setConfirmDelSub(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 5, color: t2, fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Non</button>
-                  </div>
-                ) : <button onClick={() => setConfirmDelSub(s.id)} style={{ background: "none", border: "none", color: t2 + "30", cursor: "pointer", fontSize: 13 }}>🗑</button>}
-              </div>
+
+        {/* CARDS STATS RICHES */}
+        {subsStats.activeCount > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "repeat(4, 1fr)" : "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            <G glow={vio} style={{ padding: "12px 14px" }}>
+              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>💰 Mensuel</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: vio }}>{fmt(subsStats.monthly)}</div>
             </G>
-          ); })}
+            <G style={{ padding: "12px 14px" }}>
+              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>📅 Annuel</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: t1 }}>{fmt(subsStats.yearly)}</div>
+            </G>
+            <G style={{ padding: "12px 14px" }}>
+              <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>🔢 Actifs</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: t1 }}>{subsStats.activeCount}</div>
+            </G>
+            {subsStats.mostExpensive && (
+              <G style={{ padding: "12px 14px" }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>💸 Plus cher</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: red, lineHeight: 1.2 }}>{subsStats.mostExpensive.name}</div>
+                <div style={{ fontSize: 11, color: t2, marginTop: 2 }}>{fmt2(subsStats.mostExpensive.amount)}</div>
+              </G>
+            )}
+          </div>
+        )}
+
+        {subs.length === 0 && <G style={{ padding: 28, textAlign: "center" }}><span style={{ color: t2 }}>Aucun abonnement</span></G>}
+
+        <div style={{ display: isDesktop ? "grid" : "block", gridTemplateColumns: isDesktop ? "1fr 1fr" : undefined, gap: isDesktop ? 8 : 0 }}>
+          {subs.map(s => {
+            const p = PLATFORMS.find(pl => pl.id === s.platform);
+            const days = s.active ? daysUntilNext(s.day) : null;
+            const debitColor = s.active ? getNextDebitColor(days) : t2;
+            return (
+              <G key={s.id} style={{ padding: "12px 14px", marginBottom: isDesktop ? 0 : 5, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: s.active ? 1 : 0.4 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                    <span style={{ fontSize: 12, fontWeight: 500 }}>🔄 {s.name}</span>
+                    <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: p?.color + "10", color: p?.color }}>{p?.name}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 10, color: t2 }}>Le {s.day}/mois</span>
+                    {s.active && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: debitColor, padding: "1px 6px", borderRadius: 4, background: debitColor + "15", border: `1px solid ${debitColor}30` }}>
+                        {days <= 1 ? "🔔 " : ""}{formatNextDebit(days)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, color: red }}>-{fmt2(s.amount)}</span>
+                  <button onClick={() => toggleSub(s.id)} style={{ width: 36, height: 22, borderRadius: 11, border: "none", cursor: "pointer", position: "relative", background: s.active ? green : "rgba(255,255,255,0.06)" }}><div style={{ width: 16, height: 16, borderRadius: 8, background: "#fff", position: "absolute", top: 3, left: s.active ? 17 : 3, transition: "left 0.2s" }} /></button>
+                  <button onClick={() => startEditSub(s)} title="Modifier" style={{ background: "none", border: "none", color: vio + "80", cursor: "pointer", fontSize: 13, padding: 2 }}>🖌️</button>
+                  {confirmDelSub === s.id ? (
+                    <div style={{ display: "flex", gap: 3 }}>
+                      <button onClick={() => delSub(s.id)} style={{ background: red, border: "none", borderRadius: 5, color: "#fff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Oui</button>
+                      <button onClick={() => setConfirmDelSub(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 5, color: t2, fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Non</button>
+                    </div>
+                  ) : <button onClick={() => setConfirmDelSub(s.id)} style={{ background: "none", border: "none", color: t2 + "30", cursor: "pointer", fontSize: 13 }}>🗑</button>}
+                </div>
+              </G>
+            );
+          })}
         </div>
       </>)}
 
@@ -2200,10 +2313,10 @@ export default function App() {
 
         {/* MODAL SUB */}
         {modal === "sub" && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => setModal(null)}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => { setModal(null); setEditingSub(null); setSf({ name: "", amount: "", platform: "revolut", day: 1 }); }}>
             <div style={{ background: "#0a0a10", borderRadius: isDesktop ? 18 : "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: isDesktop ? "1px solid rgba(255,255,255,0.07)" : "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480 }} onClick={e => e.stopPropagation()}>
               {!isDesktop && <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />}
-              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, textAlign: "center" }}>🔄 Nouvel abonnement</div>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, textAlign: "center" }}>{editingSub ? "🖌️ Modifier l'abonnement" : "🔄 Nouvel abonnement"}</div>
               <div style={{ marginBottom: 10 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Nom</div><input value={sf.name} onChange={e => usf("name", e.target.value)} placeholder="Netflix, Spotify..." autoFocus style={inputStyle} /></div>
               <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                 <div style={{ flex: 1 }}><div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>€/mois</div><input type="number" value={sf.amount} onChange={e => usf("amount", e.target.value)} placeholder="9.99" style={inputStyle} /></div>
@@ -2215,7 +2328,7 @@ export default function App() {
                   {PLATFORMS.map(p => (<button key={p.id} onClick={() => usf("platform", p.id)} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${sf.platform === p.id ? p.color + "50" : "rgba(255,255,255,0.05)"}`, background: sf.platform === p.id ? p.color + "12" : "transparent", color: sf.platform === p.id ? p.color : t2, fontSize: 12, cursor: "pointer", fontFamily: ff, fontWeight: 600 }}>{p.icon} {p.name}</button>))}
                 </div>
               </div>
-              <button onClick={addSub} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff", background: `linear-gradient(135deg, ${vio}, ${purple})` }}>Ajouter</button>
+              <button onClick={addSub} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff", background: `linear-gradient(135deg, ${vio}, ${purple})` }}>{editingSub ? "Sauvegarder" : "Ajouter"}</button>
             </div>
           </div>
         )}
