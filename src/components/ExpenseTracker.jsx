@@ -877,6 +877,7 @@ export default function App() {
   const [sf, setSf] = useState({ name: "", amount: "", platform: "revolut", day: 1, utility: 3, end_date: "" });
   const [editingSub, setEditingSub] = useState(null); // id de l'abo en cours d'édition
   const [subSort, setSubSort] = useState("price_desc"); // tri des abos: price_desc / utility_asc / utility_desc / default
+  const [subView, setSubView] = useState("active"); // active = actifs, stopped = arrêtés
   const usf = (k, v) => setSf(p => ({ ...p, [k]: v }));
 
   const prevPctRef = useRef(0);
@@ -1197,9 +1198,13 @@ export default function App() {
     return t2; // plus loin = neutre
   };
 
-  // Liste triée des abos selon subSort
+  // Liste triée des abos selon subSort + filtrée par subView (active/stopped)
   const sortedSubs = useMemo(() => {
-    const arr = [...subs];
+    let arr = [...subs];
+    // Filtre selon la vue
+    if (subView === "active") arr = arr.filter(s => s.active);
+    else if (subView === "stopped") arr = arr.filter(s => !s.active);
+    // Tri
     if (subSort === "price_desc") return arr.sort((a, b) => b.amount - a.amount);
     if (subSort === "price_asc") return arr.sort((a, b) => a.amount - b.amount);
     if (subSort === "utility_desc") return arr.sort((a, b) => (b.utility || 0) - (a.utility || 0));
@@ -1207,7 +1212,7 @@ export default function App() {
     if (subSort === "date_asc") return arr.sort((a, b) => daysUntilNext(a.day) - daysUntilNext(b.day));
     if (subSort === "date_desc") return arr.sort((a, b) => daysUntilNext(b.day) - daysUntilNext(a.day));
     return arr;
-  }, [subs, subSort]);
+  }, [subs, subSort, subView]);
 
   // Liste des abos avec une date d'arrêt qui approche (≤30 jours, sauf passée)
   const upcomingEndingSubs = useMemo(() => {
@@ -1402,30 +1407,33 @@ export default function App() {
       await supabase.from('transactions').update(payload).eq('id', editTx);
       setEditTx(null);
     } else {
-      const tx = { id: uid(), type: f.type, amount, platform: f.platform, date: f.date, note: f.note };
-      if (f.type === "expense") tx.category = f.category;
-      if (f.type === "income") tx.inc_category = f.incCategory;
-      if (f.type === "transfer") { tx.to = f.to; const fees = parseFloat(f.fees) || 0; if (fees > 0) tx.fees = fees; }
-      await supabase.from('transactions').insert(tx);
-
-      // Si dépense + catégorie Abo + case cochée → créer l'abonnement récurrent
+      // CAS SPÉCIAL : si dépense + catégorie Abo + case cochée → créer SEULEMENT l'abo
+      // (pas la transaction manuelle, sinon doublon avec celle générée automatiquement par genRec)
       if (f.type === "expense" && f.category === "abonnement" && f.makeRecurring && f.note) {
         const dayOfMonth = new Date(f.date).getDate();
         await supabase.from('subscriptions').insert({
           id: uid(),
-          name: f.note.replace(/^🔄\s*/, ""), // au cas où il a un emoji déjà
+          name: f.note.replace(/^🔄\s*/, ""),
           amount,
           platform: f.platform,
           day: dayOfMonth,
           active: true,
           start_date: f.date,
         });
-      }
+        playExpenseClick(muted);
+      } else {
+        // Cas normal : créer la transaction
+        const tx = { id: uid(), type: f.type, amount, platform: f.platform, date: f.date, note: f.note };
+        if (f.type === "expense") tx.category = f.category;
+        if (f.type === "income") tx.inc_category = f.incCategory;
+        if (f.type === "transfer") { tx.to = f.to; const fees = parseFloat(f.fees) || 0; if (fees > 0) tx.fees = fees; }
+        await supabase.from('transactions').insert(tx);
 
-      // Sons
-      if (f.type === "expense") playExpenseClick(muted);
-      else if (f.type === "income") playCashRegister(muted);
-      else if (f.type === "transfer") playSwoosh(muted);
+        // Sons
+        if (f.type === "expense") playExpenseClick(muted);
+        else if (f.type === "income") playCashRegister(muted);
+        else if (f.type === "transfer") playSwoosh(muted);
+      }
     }
     setF(p => ({ ...p, amount: "", note: "", fees: "", makeRecurring: true })); setModal(null);
     await loadAll();
@@ -2338,6 +2346,22 @@ export default function App() {
             <div style={{ fontSize: 12, color: t2 }}>{subsStats.activeCount} actif{subsStats.activeCount > 1 ? "s" : ""} sur {subsStats.totalCount}</div>
           </div>
           <button onClick={() => { setEditingSub(null); setSf({ name: "", amount: "", platform: "revolut", day: 1, utility: 3, end_date: "" }); setModal("sub"); }} style={{ background: vio + "20", color: vio, border: `1px solid ${vio}40`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
+        </div>
+
+        {/* TABS Actifs / Arrêtés */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          <button
+            onClick={() => setSubView("active")}
+            style={{ ...pill(subView === "active", green), padding: "6px 14px", fontSize: 12, fontWeight: 600 }}
+          >
+            ✅ Actifs ({subs.filter(s => s.active).length})
+          </button>
+          <button
+            onClick={() => setSubView("stopped")}
+            style={{ ...pill(subView === "stopped", t2), padding: "6px 14px", fontSize: 12, fontWeight: 600 }}
+          >
+            🛑 Arrêtés ({subs.filter(s => !s.active).length})
+          </button>
         </div>
 
         {/* CARDS STATS RICHES */}
