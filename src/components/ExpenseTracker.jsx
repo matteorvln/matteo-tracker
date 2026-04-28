@@ -25,6 +25,7 @@ const EXP_CATS = [
   { id: "sante", name: "Santé", emoji: "🏥", color: "#34d399" },
   { id: "logement", name: "Logement", emoji: "🏠", color: "#fbbf24" },
   { id: "assurance", name: "Assurance", emoji: "🛡️", color: "#60a5fa" },
+  { id: "casino_pompette_dep", name: "Casino Pompette", emoji: "🍻", color: "#f59e0b" },
   { id: "inconnu", name: "Inconnu", emoji: "❓", color: "#facc15" },
 ];
 
@@ -613,27 +614,31 @@ function SankeyDiagram({ allTx, period, initialBalances, t1, t2, vio, green, red
               <stop offset="100%" stopColor={link.targetNode.color} stopOpacity="0.6" />
             </linearGradient>
           ))}
+          {/* Filtre glow pour les transferts */}
+          <filter id="transfer-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
         {/* Liens (en arrière-plan) */}
         {layoutedLinks.map((link, i) => {
           const isHovered = hoveredLink === i;
+          const isTransfer = link.kind === "transfer";
           // Pour les transferts, on utilise un dégradé source -> destination
           // Pour les revenus et dépenses, on garde la couleur source
-          const transferIdx = link.kind === "transfer"
+          const transferIdx = isTransfer
             ? layoutedLinks.filter((l, idx) => l.kind === "transfer" && idx <= i).length - 1
             : -1;
-          const fillValue = link.kind === "transfer"
+          const fillValue = isTransfer
             ? `url(#transfer-grad-${transferIdx})`
             : link.color;
 
           // Calculer le point central du ruban pour placer la flèche
-          // On va prendre le milieu en X et la moyenne des Y source/cible
           const midX = (link.sourceNode.x + nodeWidth + link.targetNode.x) / 2;
-          // Le path est un ruban — on prend le centre verticalement (approx)
-          // sourceNode.y + h/2 et targetNode.y + h/2 marche pour le simple cas
-          // Mais ici on a des offsets cumulés, donc on calcule autrement :
-          // On extrait du path les coords de début et fin (approximation OK)
           const pathMatch = link.path.match(/M ([\d.]+) ([\d.]+)[\s\S]*?L ([\d.]+) ([\d.]+)/);
           let arrowY = 0;
           if (pathMatch) {
@@ -647,16 +652,19 @@ function SankeyDiagram({ allTx, period, initialBalances, t1, t2, vio, green, red
               <path
                 d={link.path}
                 fill={fillValue}
-                fillOpacity={isHovered ? 0.85 : 0.6}
-                stroke="none"
-                style={{ cursor: "pointer", transition: "fill-opacity 0.2s" }}
+                fillOpacity={isHovered ? 0.85 : (isTransfer ? 0.55 : 0.6)}
+                stroke={isTransfer ? "#c4b5fd" : "none"}
+                strokeWidth={isTransfer ? 2 : 0}
+                strokeOpacity={isTransfer ? (isHovered ? 1 : 0.9) : 0}
+                filter={isTransfer ? "url(#transfer-glow)" : undefined}
+                style={{ cursor: "pointer", transition: "fill-opacity 0.2s, stroke-opacity 0.2s" }}
                 onMouseEnter={() => setHoveredLink(i)}
                 onMouseLeave={() => setHoveredLink(null)}
               />
               {/* Flèche au milieu du ruban indiquant la direction */}
               <polygon
                 points={`${midX - 5},${arrowY - 5} ${midX + 5},${arrowY} ${midX - 5},${arrowY + 5}`}
-                fill={link.kind === "transfer" ? "#c4b5fd" : link.color}
+                fill={isTransfer ? "#c4b5fd" : link.color}
                 opacity={isHovered ? 1 : 0.85}
                 style={{ pointerEvents: "none", filter: `drop-shadow(0 0 3px ${link.kind === "transfer" ? "#c4b5fd" : link.color})` }}
               />
@@ -865,8 +873,9 @@ export default function App() {
 
   const [f, setF] = useState({ type: "expense", amount: "", platform: "revolut", category: "quotidien", incCategory: "rainbet_video", note: "", date: new Date().toISOString().split("T")[0], to: "phantom", fees: "", makeRecurring: true, day: 1 });
   const uf = (k, v) => setF(p => ({ ...p, [k]: v }));
-  const [sf, setSf] = useState({ name: "", amount: "", platform: "revolut", day: 1 });
+  const [sf, setSf] = useState({ name: "", amount: "", platform: "revolut", day: 1, utility: 3, end_date: "" });
   const [editingSub, setEditingSub] = useState(null); // id de l'abo en cours d'édition
+  const [subSort, setSubSort] = useState("price_desc"); // tri des abos: price_desc / utility_asc / utility_desc / default
   const usf = (k, v) => setSf(p => ({ ...p, [k]: v }));
 
   const prevPctRef = useRef(0);
@@ -1167,6 +1176,43 @@ export default function App() {
     return `Dans ${days}j`;
   };
 
+  // Calcul des jours avant la date d'arrêt prévue d'un abo (peut être négatif si dépassée)
+  const daysUntilEnd = (endDateStr) => {
+    if (!endDateStr) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const endDate = new Date(endDateStr);
+    endDate.setHours(0, 0, 0, 0);
+    return Math.round((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  };
+
+  // Couleur d'urgence pour la date d'arrêt
+  const getEndDateColor = (days) => {
+    if (days === null) return null;
+    if (days < 0) return red; // déjà dépassée
+    if (days <= 7) return red; // moins d'une semaine
+    if (days <= 30) return "#fbbf24"; // moins d'un mois
+    return t2; // plus loin = neutre
+  };
+
+  // Liste triée des abos selon subSort
+  const sortedSubs = useMemo(() => {
+    const arr = [...subs];
+    if (subSort === "price_desc") return arr.sort((a, b) => b.amount - a.amount);
+    if (subSort === "price_asc") return arr.sort((a, b) => a.amount - b.amount);
+    if (subSort === "utility_desc") return arr.sort((a, b) => (b.utility || 0) - (a.utility || 0));
+    if (subSort === "utility_asc") return arr.sort((a, b) => (a.utility || 0) - (b.utility || 0));
+    return arr;
+  }, [subs, subSort]);
+
+  // Liste des abos avec une date d'arrêt qui approche (≤30 jours, sauf passée)
+  const upcomingEndingSubs = useMemo(() => {
+    return subs.filter(s => s.active && s.end_date).map(s => ({
+      ...s,
+      daysLeft: daysUntilEnd(s.end_date),
+    })).filter(s => s.daysLeft !== null && s.daysLeft <= 30).sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [subs]);
+
   const eleaTotal = useMemo(() => {
     return allTx.filter(tx => mkey(tx.date) === month && (tx.note || "").toLowerCase().includes("elea")).reduce((s, tx) => s + tx.amount, 0);
   }, [allTx, month]);
@@ -1427,22 +1473,42 @@ export default function App() {
   };
   const addSub = async () => {
     const a = parseFloat(sf.amount); if (!a || !sf.name) return;
+    const payload = {
+      name: sf.name,
+      amount: a,
+      platform: sf.platform,
+      day: parseInt(sf.day) || 1,
+      utility: parseInt(sf.utility) || 0,
+      end_date: sf.end_date || null,
+    };
     if (editingSub) {
       // Mode édition
-      await supabase.from('subscriptions').update({
-        name: sf.name, amount: a, platform: sf.platform, day: parseInt(sf.day) || 1
-      }).eq('id', editingSub);
+      await supabase.from('subscriptions').update(payload).eq('id', editingSub);
       setEditingSub(null);
     } else {
       // Mode création
-      await supabase.from('subscriptions').insert({ id: uid(), name: sf.name, amount: a, platform: sf.platform, day: parseInt(sf.day) || 1, active: true, start_date: new Date().toISOString().split("T")[0] });
+      await supabase.from('subscriptions').insert({
+        id: uid(),
+        ...payload,
+        active: true,
+        start_date: new Date().toISOString().split("T")[0],
+      });
     }
-    setSf({ name: "", amount: "", platform: "revolut", day: 1 }); setModal(null); await loadAll();
+    setSf({ name: "", amount: "", platform: "revolut", day: 1, utility: 3, end_date: "" });
+    setModal(null);
+    await loadAll();
   };
 
   // Démarrer l'édition d'un abo : remplir le formulaire + ouvrir le modal
   const startEditSub = (sub) => {
-    setSf({ name: sub.name, amount: String(sub.amount), platform: sub.platform, day: sub.day });
+    setSf({
+      name: sub.name,
+      amount: String(sub.amount),
+      platform: sub.platform,
+      day: sub.day,
+      utility: sub.utility !== undefined && sub.utility !== null ? sub.utility : 3,
+      end_date: sub.end_date || "",
+    });
     setEditingSub(sub.id);
     setModal("sub");
   };
@@ -1474,8 +1540,8 @@ export default function App() {
 
   if (!loaded) return <div style={{ background: bg, color: "#fff", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: ff }}>⏳</div>;
 
-  const donutExp = EXP_CATS.map(c => ({ value: stats.bc[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0);
-  const donutInc = INC_CATS.map(c => ({ value: stats.ic[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0);
+  const donutExp = EXP_CATS.map(c => ({ value: stats.bc[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
+  const donutInc = INC_CATS.map(c => ({ value: stats.ic[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
   const visTx = showAllTx ? mTx : mTx.slice(0, isDesktop ? 10 : 6);
 
   const pill = (active, color) => ({
@@ -1584,6 +1650,26 @@ export default function App() {
           </div>
         )}
 
+        {/* CARD ALERTE ABOS À ARRÊTER */}
+        {upcomingEndingSubs.length > 0 && (
+          <G glow="#fbbf24" style={{ padding: isDesktop ? "14px 18px" : "12px 14px", marginBottom: isDesktop ? 12 : 10, border: "1px solid #fbbf2440" }}>
+            <div style={{ fontSize: 11, color: "#fbbf24", textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 8, fontWeight: 600 }}>🔔 Abonnement{upcomingEndingSubs.length > 1 ? "s" : ""} à arrêter</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {upcomingEndingSubs.slice(0, 5).map(s => {
+                const color = getEndDateColor(s.daysLeft);
+                return (
+                  <div key={s.id} onClick={() => setTab("subs")} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "6px 10px", borderRadius: 8, background: color + "10", border: `1px solid ${color}25` }}>
+                    <div style={{ fontSize: 12, fontWeight: 500 }}>🔄 {s.name} <span style={{ color: t2, fontSize: 11 }}>· {fmt2(s.amount)}/mois</span></div>
+                    <div style={{ fontSize: 11, color, fontWeight: 600 }}>
+                      {s.daysLeft < 0 ? `Dépassé de ${-s.daysLeft}j` : s.daysLeft === 0 ? "Aujourd'hui !" : `Dans ${s.daysLeft}j`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </G>
+        )}
+
         {/* CARD TRAJECTOIRE PATRIMOINE → OBJECTIF AU 31/12/2026 */}
         {trajectory.monthsLeft > 0 && trajectory.avgMonthlyNet !== 0 && (
           <G glow={trajectory.isOnTrack ? green : "#fbbf24"} style={{ padding: isDesktop ? "16px 20px" : "14px 16px", marginBottom: isDesktop ? 16 : 10 }}>
@@ -1668,7 +1754,7 @@ export default function App() {
                   <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
                     <Donut data={donutExp} size={120} />
                     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-                      {donutExp.slice(0, 5).map(d => (
+                      {donutExp.slice(0, 7).map(d => (
                         <div key={d.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color }} />
@@ -2211,7 +2297,7 @@ export default function App() {
             <div style={{ fontSize: isDesktop ? 17 : 15, fontWeight: 600 }}>🔄 Abonnements</div>
             <div style={{ fontSize: 12, color: t2 }}>{subsStats.activeCount} actif{subsStats.activeCount > 1 ? "s" : ""} sur {subsStats.totalCount}</div>
           </div>
-          <button onClick={() => { setEditingSub(null); setSf({ name: "", amount: "", platform: "revolut", day: 1 }); setModal("sub"); }} style={{ background: vio + "20", color: vio, border: `1px solid ${vio}40`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
+          <button onClick={() => { setEditingSub(null); setSf({ name: "", amount: "", platform: "revolut", day: 1, utility: 3, end_date: "" }); setModal("sub"); }} style={{ background: vio + "20", color: vio, border: `1px solid ${vio}40`, borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: ff, fontSize: 12, fontWeight: 600 }}>+ Ajouter</button>
         </div>
 
         {/* CARDS STATS RICHES */}
@@ -2241,23 +2327,57 @@ export default function App() {
 
         {subs.length === 0 && <G style={{ padding: 28, textAlign: "center" }}><span style={{ color: t2 }}>Aucun abonnement</span></G>}
 
+        {/* BOUTONS DE TRI */}
+        {subs.length > 1 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: t2, marginRight: 4 }}>Trier par :</span>
+            <button
+              onClick={() => setSubSort(subSort === "price_desc" ? "price_asc" : "price_desc")}
+              style={{ ...pill(subSort === "price_desc" || subSort === "price_asc", red), padding: "5px 10px", fontSize: 11 }}
+            >
+              💰 Prix {subSort === "price_desc" ? "↓" : subSort === "price_asc" ? "↑" : ""}
+            </button>
+            <button
+              onClick={() => setSubSort(subSort === "utility_desc" ? "utility_asc" : "utility_desc")}
+              style={{ ...pill(subSort === "utility_desc" || subSort === "utility_asc", "#facc15"), padding: "5px 10px", fontSize: 11 }}
+            >
+              ⭐ Utilité {subSort === "utility_desc" ? "↓" : subSort === "utility_asc" ? "↑" : ""}
+            </button>
+          </div>
+        )}
+
         <div style={{ display: isDesktop ? "grid" : "block", gridTemplateColumns: isDesktop ? "1fr 1fr" : undefined, gap: isDesktop ? 8 : 0 }}>
-          {subs.map(s => {
+          {sortedSubs.map(s => {
             const p = PLATFORMS.find(pl => pl.id === s.platform);
             const days = s.active ? daysUntilNext(s.day) : null;
             const debitColor = s.active ? getNextDebitColor(days) : t2;
+            const utility = s.utility !== undefined && s.utility !== null ? s.utility : 0;
+            const endDays = s.end_date ? daysUntilEnd(s.end_date) : null;
+            const endColor = getEndDateColor(endDays);
             return (
               <G key={s.id} style={{ padding: "12px 14px", marginBottom: isDesktop ? 0 : 5, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: s.active ? 1 : 0.4 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 12, fontWeight: 500 }}>🔄 {s.name}</span>
                     <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: p?.color + "10", color: p?.color }}>{p?.name}</span>
+                    {/* Étoiles utilité */}
+                    {utility > 0 && (
+                      <span style={{ fontSize: 11, color: "#facc15", letterSpacing: -1 }} title={`Utilité ${utility}/5`}>
+                        {"★".repeat(utility)}<span style={{ color: "rgba(255,255,255,0.12)" }}>{"★".repeat(5 - utility)}</span>
+                      </span>
+                    )}
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 10, color: t2 }}>Le {s.day}/mois</span>
                     {s.active && (
                       <span style={{ fontSize: 10, fontWeight: 600, color: debitColor, padding: "1px 6px", borderRadius: 4, background: debitColor + "15", border: `1px solid ${debitColor}30` }}>
                         {days <= 1 ? "🔔 " : ""}{formatNextDebit(days)}
+                      </span>
+                    )}
+                    {/* Date d'arrêt si prévue */}
+                    {endDays !== null && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: endColor, padding: "1px 6px", borderRadius: 4, background: endColor + "15", border: `1px solid ${endColor}30` }}>
+                        🔔 {endDays < 0 ? `Arrêter ! Dépassé de ${-endDays}j` : endDays === 0 ? "Arrêter aujourd'hui !" : `Arrêter dans ${endDays}j`}
                       </span>
                     )}
                   </div>
@@ -2634,7 +2754,7 @@ export default function App() {
 
         {/* MODAL SUB */}
         {modal === "sub" && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => { setModal(null); setEditingSub(null); setSf({ name: "", amount: "", platform: "revolut", day: 1 }); }}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(12px)", display: "flex", alignItems: isDesktop ? "center" : "flex-end", justifyContent: "center", zIndex: 100 }} onClick={() => { setModal(null); setEditingSub(null); setSf({ name: "", amount: "", platform: "revolut", day: 1, utility: 3, end_date: "" }); }}>
             <div style={{ background: "#0a0a10", borderRadius: isDesktop ? 18 : "18px 18px 0 0", border: "1px solid rgba(255,255,255,0.07)", borderBottom: isDesktop ? "1px solid rgba(255,255,255,0.07)" : "none", padding: "18px 16px 28px", width: "100%", maxWidth: 480 }} onClick={e => e.stopPropagation()}>
               {!isDesktop && <div style={{ width: 30, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", margin: "0 auto 12px" }} />}
               <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, textAlign: "center" }}>{editingSub ? "🖌️ Modifier l'abonnement" : "🔄 Nouvel abonnement"}</div>
@@ -2648,6 +2768,23 @@ export default function App() {
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                   {PLATFORMS.map(p => (<button key={p.id} onClick={() => usf("platform", p.id)} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${sf.platform === p.id ? p.color + "50" : "rgba(255,255,255,0.05)"}`, background: sf.platform === p.id ? p.color + "12" : "transparent", color: sf.platform === p.id ? p.color : t2, fontSize: 12, cursor: "pointer", fontFamily: ff, fontWeight: 600 }}>{p.icon} {p.name}</button>))}
                 </div>
+              </div>
+              {/* UTILITY: étoiles cliquables 0-5 */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>⭐ Utilité (0 = à virer / 5 = indispensable)</div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button key={n} onClick={() => usf("utility", n)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, padding: 2, color: n <= (sf.utility || 0) ? "#facc15" : "rgba(255,255,255,0.15)", filter: n <= (sf.utility || 0) ? "drop-shadow(0 0 3px #facc1580)" : "none", transition: "color 0.2s" }}>★</button>
+                  ))}
+                  <span style={{ marginLeft: 8, fontSize: 12, color: t2 }}>{sf.utility || 0}/5</span>
+                  {sf.utility > 0 && <button onClick={() => usf("utility", 0)} style={{ marginLeft: "auto", background: "none", border: "none", color: t2, fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>Reset</button>}
+                </div>
+              </div>
+              {/* END DATE: date de fin prévue (optionnel) */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>🔔 Date d'arrêt prévue (optionnel)</div>
+                <input type="date" value={sf.end_date || ""} onChange={e => usf("end_date", e.target.value)} style={inputStyle} />
+                {sf.end_date && <button onClick={() => usf("end_date", "")} style={{ marginTop: 4, background: "none", border: "none", color: t2, fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>Effacer la date</button>}
               </div>
               <button onClick={addSub} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", fontFamily: ff, fontSize: 15, fontWeight: 600, color: "#fff", background: `linear-gradient(135deg, ${vio}, ${purple})` }}>{editingSub ? "Sauvegarder" : "Ajouter"}</button>
             </div>
