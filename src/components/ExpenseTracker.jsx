@@ -1696,26 +1696,6 @@ export default function App() {
           </div>
         )}
 
-        {/* CARD ALERTE ABOS À ARRÊTER */}
-        {upcomingEndingSubs.length > 0 && (
-          <G glow="#fbbf24" style={{ padding: isDesktop ? "14px 18px" : "12px 14px", marginBottom: isDesktop ? 12 : 10, border: "1px solid #fbbf2440" }}>
-            <div style={{ fontSize: 11, color: "#fbbf24", textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 8, fontWeight: 600 }}>🔔 Abonnement{upcomingEndingSubs.length > 1 ? "s" : ""} à arrêter</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {upcomingEndingSubs.slice(0, 5).map(s => {
-                const color = getEndDateColor(s.daysLeft);
-                return (
-                  <div key={s.id} onClick={() => setTab("subs")} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "6px 10px", borderRadius: 8, background: color + "10", border: `1px solid ${color}25` }}>
-                    <div style={{ fontSize: 12, fontWeight: 500 }}>🔄 {s.name} <span style={{ color: t2, fontSize: 11 }}>· {fmt2(s.amount)}/mois</span></div>
-                    <div style={{ fontSize: 11, color, fontWeight: 600 }}>
-                      {s.daysLeft < 0 ? `Dépassé de ${-s.daysLeft}j` : s.daysLeft === 0 ? "Aujourd'hui !" : `Dans ${s.daysLeft}j`}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </G>
-        )}
-
         {/* CARD TRAJECTOIRE PATRIMOINE → OBJECTIF AU 31/12/2026 */}
         {trajectory.monthsLeft > 0 && trajectory.avgMonthlyNet !== 0 && (
           <G glow={trajectory.isOnTrack ? green : "#fbbf24"} style={{ padding: isDesktop ? "16px 20px" : "14px 16px", marginBottom: isDesktop ? 16 : 10 }}>
@@ -1738,7 +1718,7 @@ export default function App() {
             <div style={{ display: "grid", gridTemplateColumns: isDesktop ? "1fr 1fr 1fr" : "1fr", gap: 10 }}>
               <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
                 <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>📈 À ce rythme</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: trajectory.isOnTrack ? green : "#fbbf24" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: t1 }}>
                   {fmt(trajectory.projectedAtTarget)}
                 </div>
                 <div style={{ fontSize: 10, color: t2, marginTop: 2 }}>
@@ -1749,12 +1729,12 @@ export default function App() {
               </div>
               <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
                 <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>💰 Net moyen actuel</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: trajectory.avgMonthlyNet >= 0 ? green : red }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: t1 }}>
                   {trajectory.avgMonthlyNet >= 0 ? "+" : "-"}{fmt(Math.abs(trajectory.avgMonthlyNet))}
                 </div>
                 <div style={{ fontSize: 10, color: t2, marginTop: 2 }}>par mois (pondéré)</div>
               </div>
-              <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: `1px solid ${vio}30` }}>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
                 <div style={{ fontSize: 10, color: t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>🎯 Rythme nécessaire</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: vioBright }}>
                   {fmt(trajectory.neededMonthly)}
@@ -1785,13 +1765,6 @@ export default function App() {
                 <span style={{ fontSize: 11, color: t2, letterSpacing: 1.2 }}>NET </span>
                 <span style={{ fontSize: 30, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : "-"}{fmt(stats.net)}</span>
               </G>
-
-              <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-                {totalSubsMonth > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>📱 Abos</div><div style={{ fontSize: 13, fontWeight: 600, color: vio }}>{fmt(totalSubsMonth)}/mois</div></G>}
-                {eleaTotal > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>💕 Elea</div><div style={{ fontSize: 13, fontWeight: 600, color: "#f472b6" }}>{fmt(eleaTotal)}</div></G>}
-                {totalPendingRefunds > 0 && <G style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center" }} onClick={() => setTab("refunds")}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>💸 Remb.</div><div style={{ fontSize: 13, fontWeight: 600, color: "#fbbf24" }}>{fmt(totalPendingRefunds)}</div></G>}
-                {inconnuStats.count > 0 && <G glow="#facc15" style={{ padding: "10px 14px", flex: "1 1 30%", textAlign: "center", border: "1px solid #facc1540" }} onClick={() => setInconnuFilter(true)}><div style={{ fontSize: 10, color: t2, marginBottom: 2 }}>❓ À vérifier</div><div style={{ fontSize: 13, fontWeight: 600, color: "#facc15" }}>{inconnuStats.count} tx · {fmt(inconnuStats.total)}</div></G>}
-              </div>
 
               {/* Mini donut dépenses */}
               {donutExp.length > 0 && (
@@ -1831,6 +1804,40 @@ export default function App() {
                   </div>
                 </G>
               )}
+
+              {/* 4 CARDS : Abos · Elea · Remb · À vérifier (sous le donut) */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 12 }}>
+                <G style={{ padding: "12px 14px", textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>📱 Abos</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: totalSubsMonth > 0 ? vio : t2 + "60" }}>
+                    {totalSubsMonth > 0 ? `${fmt(totalSubsMonth)}/mois` : "—"}
+                  </div>
+                </G>
+                <G style={{ padding: "12px 14px", textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>💕 Elea</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: eleaTotal > 0 ? "#f472b6" : t2 + "60" }}>
+                    {eleaTotal > 0 ? fmt(eleaTotal) : "—"}
+                  </div>
+                </G>
+                <G
+                  style={{ padding: "12px 14px", textAlign: "center", cursor: totalPendingRefunds > 0 ? "pointer" : "default" }}
+                  onClick={() => totalPendingRefunds > 0 && setTab("refunds")}
+                >
+                  <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>💸 Remb.</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: totalPendingRefunds > 0 ? "#fbbf24" : t2 + "60" }}>
+                    {totalPendingRefunds > 0 ? fmt(totalPendingRefunds) : "—"}
+                  </div>
+                </G>
+                <G
+                  style={{ padding: "12px 14px", textAlign: "center", cursor: inconnuStats.count > 0 ? "pointer" : "default" }}
+                  onClick={() => inconnuStats.count > 0 && setInconnuFilter(true)}
+                >
+                  <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>❓ À vérifier</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: inconnuStats.count > 0 ? "#fbbf24" : t2 + "60" }}>
+                    {inconnuStats.count > 0 ? `${inconnuStats.count} tx · ${fmt(inconnuStats.total)}` : "—"}
+                  </div>
+                </G>
+              </div>
             </div>
 
             <div>
