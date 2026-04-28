@@ -862,6 +862,7 @@ export default function App() {
   const [editTx, setEditTx] = useState(null);
   const [eleaFilter, setEleaFilter] = useState(false);
   const [inconnuFilter, setInconnuFilter] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState(null); // id de la catégorie de dépense filtrée
   const [refundForm, setRefundForm] = useState({ label: "", amount: "", date: new Date().toISOString().split("T")[0] });
   const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
   const [heatmapSelectedDate, setHeatmapSelectedDate] = useState(null);
@@ -1004,6 +1005,7 @@ export default function App() {
     if (pFilter !== "all") txs = txs.filter(tx => tx.platform === pFilter || tx.to === pFilter);
     if (eleaFilter) txs = txs.filter(tx => (tx.note || "").toLowerCase().includes("elea"));
     if (inconnuFilter) txs = txs.filter(tx => tx.category === "inconnu");
+    if (categoryFilter) txs = txs.filter(tx => tx.category === categoryFilter);
     if (txTypeFilter !== "all") txs = txs.filter(tx => tx.type === txTypeFilter);
     if (search) {
       const q = search.toLowerCase();
@@ -1016,7 +1018,7 @@ export default function App() {
     if (sortBy === "amount_desc") return txs.sort((a, b) => b.amount - a.amount);
     if (sortBy === "amount_asc") return txs.sort((a, b) => a.amount - b.amount);
     return txs.sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [allTx, month, pFilter, search, sortBy, eleaFilter, txTypeFilter, inconnuFilter]);
+  }, [allTx, month, pFilter, search, sortBy, eleaFilter, txTypeFilter, inconnuFilter, categoryFilter]);
 
   const stats = useMemo(() => {
     let inc = 0, exp = 0; const bc = {}, ic = {};
@@ -1202,6 +1204,8 @@ export default function App() {
     if (subSort === "price_asc") return arr.sort((a, b) => a.amount - b.amount);
     if (subSort === "utility_desc") return arr.sort((a, b) => (b.utility || 0) - (a.utility || 0));
     if (subSort === "utility_asc") return arr.sort((a, b) => (a.utility || 0) - (b.utility || 0));
+    if (subSort === "date_asc") return arr.sort((a, b) => daysUntilNext(a.day) - daysUntilNext(b.day));
+    if (subSort === "date_desc") return arr.sort((a, b) => daysUntilNext(b.day) - daysUntilNext(a.day));
     return arr;
   }, [subs, subSort]);
 
@@ -1540,8 +1544,8 @@ export default function App() {
 
   if (!loaded) return <div style={{ background: bg, color: "#fff", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: ff }}>⏳</div>;
 
-  const donutExp = EXP_CATS.map(c => ({ value: stats.bc[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
-  const donutInc = INC_CATS.map(c => ({ value: stats.ic[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
+  const donutExp = EXP_CATS.map(c => ({ id: c.id, value: stats.bc[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
+  const donutInc = INC_CATS.map(c => ({ id: c.id, value: stats.ic[c.id] || 0, color: c.color, label: c.name })).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
   const visTx = showAllTx ? mTx : mTx.slice(0, isDesktop ? 10 : 6);
 
   const pill = (active, color) => ({
@@ -1753,16 +1757,34 @@ export default function App() {
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12, color: red }}>Dépenses du mois</div>
                   <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
                     <Donut data={donutExp} size={120} />
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-                      {donutExp.slice(0, 7).map(d => (
-                        <div key={d.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color }} />
-                            <span style={{ fontSize: 11, color: t2 }}>{d.label}</span>
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                      {donutExp.slice(0, 7).map(d => {
+                        const isActive = categoryFilter === d.id;
+                        return (
+                          <div
+                            key={d.id}
+                            onClick={() => setCategoryFilter(isActive ? null : d.id)}
+                            title={isActive ? "Cliquer pour désactiver le filtre" : `Filtrer les transactions par ${d.label}`}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              padding: "4px 8px",
+                              borderRadius: 6,
+                              cursor: "pointer",
+                              background: isActive ? d.color + "20" : "transparent",
+                              border: `1px solid ${isActive ? d.color + "40" : "transparent"}`,
+                              transition: "background 0.15s",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color }} />
+                              <span style={{ fontSize: 11, color: isActive ? d.color : t2, fontWeight: isActive ? 600 : 400 }}>{d.label}</span>
+                            </div>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: t1 }}>{fmt(d.value)}</span>
                           </div>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: t1 }}>{fmt(d.value)}</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </G>
@@ -1786,6 +1808,15 @@ export default function App() {
                 </button>
                 <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "6px 12px", fontSize: 11 }}>💕 Elea</button>
                 <button onClick={() => setInconnuFilter(!inconnuFilter)} style={{ ...pill(inconnuFilter, "#facc15"), padding: "6px 12px", fontSize: 11 }}>❓ Inconnu</button>
+                {categoryFilter && (() => {
+                  const cat = EXP_CATS.find(c => c.id === categoryFilter);
+                  if (!cat) return null;
+                  return (
+                    <button onClick={() => setCategoryFilter(null)} title="Désactiver le filtre catégorie" style={{ ...pill(true, cat.color), padding: "6px 12px", fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}>
+                      {cat.emoji} {cat.name} ×
+                    </button>
+                  );
+                })()}
                 <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
                   <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "6px 10px", fontSize: 11 }}>Tout</button>
                   {PLATFORMS.map(p => <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "6px 10px", fontSize: 11 }} title={p.name}>{p.icon}</button>)}
@@ -1839,6 +1870,15 @@ export default function App() {
               </button>
               <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "5px 10px", fontSize: 11 }}>💕</button>
               <button onClick={() => setInconnuFilter(!inconnuFilter)} style={{ ...pill(inconnuFilter, "#facc15"), padding: "5px 10px", fontSize: 11 }}>❓</button>
+              {categoryFilter && (() => {
+                const cat = EXP_CATS.find(c => c.id === categoryFilter);
+                if (!cat) return null;
+                return (
+                  <button onClick={() => setCategoryFilter(null)} title="Désactiver le filtre" style={{ ...pill(true, cat.color), padding: "5px 10px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                    {cat.emoji}×
+                  </button>
+                );
+              })()}
               <div style={{ display: "flex", gap: 3, overflowX: "auto", scrollbarWidth: "none" }}>
                 <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "5px 8px", fontSize: 10 }}>Tout</button>
                 {PLATFORMS.map(p => <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "5px 8px", fontSize: 10 }}>{p.icon}</button>)}
@@ -2343,6 +2383,12 @@ export default function App() {
             >
               ⭐ Utilité {subSort === "utility_desc" ? "↓" : subSort === "utility_asc" ? "↑" : ""}
             </button>
+            <button
+              onClick={() => setSubSort(subSort === "date_asc" ? "date_desc" : "date_asc")}
+              style={{ ...pill(subSort === "date_asc" || subSort === "date_desc", green), padding: "5px 10px", fontSize: 11 }}
+            >
+              📅 Prochain débit {subSort === "date_asc" ? "↑" : subSort === "date_desc" ? "↓" : ""}
+            </button>
           </div>
         )}
 
@@ -2350,48 +2396,53 @@ export default function App() {
           {sortedSubs.map(s => {
             const p = PLATFORMS.find(pl => pl.id === s.platform);
             const days = s.active ? daysUntilNext(s.day) : null;
-            const debitColor = s.active ? getNextDebitColor(days) : t2;
             const utility = s.utility !== undefined && s.utility !== null ? s.utility : 0;
             const endDays = s.end_date ? daysUntilEnd(s.end_date) : null;
+            // Couleur d'urgence pour le prochain débit : on n'affiche en couleur que si urgent (≤7j)
+            const debitUrgent = s.active && days !== null && days <= 7;
+            const debitColor = s.active ? getNextDebitColor(days) : t2;
+            // Couleur d'urgence pour la date de fin
             const endColor = getEndDateColor(endDays);
             return (
               <G key={s.id} style={{ padding: "12px 14px", marginBottom: isDesktop ? 0 : 5, display: "flex", justifyContent: "space-between", alignItems: "center", opacity: s.active ? 1 : 0.4 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>🔄 {s.name}</span>
-                    <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: p?.color + "10", color: p?.color }}>{p?.name}</span>
-                    {/* Étoiles utilité */}
+                  {/* Ligne 1 : nom + étoiles utilité */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: t1 }}>{s.name}</span>
                     {utility > 0 && (
                       <span style={{ fontSize: 11, color: "#facc15", letterSpacing: -1 }} title={`Utilité ${utility}/5`}>
-                        {"★".repeat(utility)}<span style={{ color: "rgba(255,255,255,0.12)" }}>{"★".repeat(5 - utility)}</span>
+                        {"★".repeat(utility)}
                       </span>
                     )}
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 10, color: t2 }}>Le {s.day}/mois</span>
-                    {s.active && (
-                      <span style={{ fontSize: 10, fontWeight: 600, color: debitColor, padding: "1px 6px", borderRadius: 4, background: debitColor + "15", border: `1px solid ${debitColor}30` }}>
-                        {days <= 1 ? "🔔 " : ""}{formatNextDebit(days)}
-                      </span>
+                  {/* Ligne 2 : plateforme · jour · prochain débit · alerte de fin (le tout en gris discret, sauf si urgent) */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11, color: "#64748b" }}>
+                    <span>{p?.name} · le {s.day}</span>
+                    {s.active && days !== null && (
+                      <>
+                        <span>·</span>
+                        <span style={{ color: debitUrgent ? debitColor : "#64748b", fontWeight: debitUrgent ? 600 : 400 }}>
+                          {days <= 1 ? "🔔 " : ""}{formatNextDebit(days)}
+                        </span>
+                      </>
                     )}
-                    {/* Date d'arrêt si prévue */}
                     {endDays !== null && (
-                      <span style={{ fontSize: 10, fontWeight: 600, color: endColor, padding: "1px 6px", borderRadius: 4, background: endColor + "15", border: `1px solid ${endColor}30` }}>
+                      <span style={{ color: endColor, fontWeight: 500 }}>
                         🔔 {endDays < 0 ? `Arrêter ! Dépassé de ${-endDays}j` : endDays === 0 ? "Arrêter aujourd'hui !" : `Arrêter dans ${endDays}j`}
                       </span>
                     )}
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: red }}>-{fmt2(s.amount)}</span>
-                  <button onClick={() => toggleSub(s.id)} style={{ width: 36, height: 22, borderRadius: 11, border: "none", cursor: "pointer", position: "relative", background: s.active ? green : "rgba(255,255,255,0.06)" }}><div style={{ width: 16, height: 16, borderRadius: 8, background: "#fff", position: "absolute", top: 3, left: s.active ? 17 : 3, transition: "left 0.2s" }} /></button>
-                  <button onClick={() => startEditSub(s)} title="Modifier" style={{ background: "none", border: "none", color: vio + "80", cursor: "pointer", fontSize: 13, padding: 2 }}>🖌️</button>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14, color: red }}>-{fmt2(s.amount)}</span>
+                  <button onClick={() => toggleSub(s.id)} style={{ width: 32, height: 18, borderRadius: 9, border: "none", cursor: "pointer", position: "relative", background: s.active ? green : "rgba(255,255,255,0.06)" }}><div style={{ width: 14, height: 14, borderRadius: 7, background: "#fff", position: "absolute", top: 2, left: s.active ? 16 : 2, transition: "left 0.2s" }} /></button>
+                  <button onClick={() => startEditSub(s)} title="Modifier" style={{ background: "none", border: "none", color: t2 + "60", cursor: "pointer", fontSize: 12, padding: 2 }}>✏️</button>
                   {confirmDelSub === s.id ? (
                     <div style={{ display: "flex", gap: 3 }}>
                       <button onClick={() => delSub(s.id)} style={{ background: red, border: "none", borderRadius: 5, color: "#fff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Oui</button>
                       <button onClick={() => setConfirmDelSub(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 5, color: t2, fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Non</button>
                     </div>
-                  ) : <button onClick={() => setConfirmDelSub(s.id)} style={{ background: "none", border: "none", color: t2 + "30", cursor: "pointer", fontSize: 13 }}>🗑</button>}
+                  ) : <button onClick={() => setConfirmDelSub(s.id)} title="Supprimer" style={{ background: "none", border: "none", color: t2 + "40", cursor: "pointer", fontSize: 14, padding: 2, lineHeight: 1 }}>×</button>}
                 </div>
               </G>
             );
