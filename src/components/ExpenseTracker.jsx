@@ -858,6 +858,8 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [showSearch, setShowSearch] = useState(false);
   const [search, setSearch] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [hoveredTxId, setHoveredTxId] = useState(null);
   const [sortBy, setSortBy] = useState("date");
   const [editTx, setEditTx] = useState(null);
   const [eleaFilter, setEleaFilter] = useState(false);
@@ -1572,43 +1574,75 @@ export default function App() {
     const isInc = tx.type === "income", isTr = tx.type === "transfer", isRec = tx.is_recurring;
     const dc = isInc ? incCat : cat;
     const hasElea = (tx.note || "").toLowerCase().includes("elea");
+    const isHovered = hoveredTxId === tx.id;
+    const isConfirmingDel = confirmDel === tx.id;
     return (
-      <G glow={confirmDel === tx.id ? red : null} style={{ padding: "10px 12px", marginBottom: 5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ flex: 1, minWidth: 0, cursor: isRec ? "default" : "pointer" }} onClick={() => !isRec && startEdit(tx)}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
-            <span style={{ fontSize: 14 }}>{dc?.emoji || (isTr ? "↔" : "💰")}</span>
-            <span style={{ fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {tx.note || dc?.name || (isTr ? `${p?.name} → ${toP?.name}` : "Revenu")}
-            </span>
-            {isRec && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: vio + "15", color: vio }}>auto</span>}
-            {hasElea && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: "#f472b6" + "15", color: "#f472b6" }}>Elea</span>}
+      <div
+        onMouseEnter={() => setHoveredTxId(tx.id)}
+        onMouseLeave={() => setHoveredTxId(null)}
+        style={{
+          padding: "10px 12px",
+          marginBottom: 3,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderRadius: 8,
+          background: isHovered || isConfirmingDel ? "rgba(255,255,255,0.03)" : "transparent",
+          border: isConfirmingDel ? `1px solid ${red}40` : "1px solid transparent",
+          transition: "background 0.15s",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0, cursor: isRec ? "default" : "pointer", display: "flex", alignItems: "center", gap: 12 }} onClick={() => !isRec && startEdit(tx)}>
+          {/* Icône dans cercle coloré (style app bancaire) */}
+          <div style={{
+            width: 32, height: 32, borderRadius: "50%",
+            background: (dc?.color || (isTr ? vio : t2)) + "15",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 15, flexShrink: 0,
+          }}>
+            {dc?.emoji || (isTr ? "↔" : "💰")}
           </div>
-          <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-            <span style={{ fontSize: 10, color: t2 }}>{new Date(tx.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>
-            <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: p?.color + "10", color: p?.color }}>{p?.name}</span>
-            {isTr && toP && <><span style={{ fontSize: 9, color: t2 }}>→</span><span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: toP?.color + "10", color: toP?.color }}>{toP?.name}</span></>}
-            {isTr && tx.fees > 0 && <span style={{ fontSize: 9, color: red }}>frais {fmt2(tx.fees)}</span>}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {tx.note || dc?.name || (isTr ? `${p?.name} → ${toP?.name}` : "Revenu")}
+              </span>
+              {isRec && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: vio + "15", color: vio }}>auto</span>}
+              {hasElea && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: "#f472b6" + "15", color: "#f472b6" }}>Elea</span>}
+            </div>
+            <div style={{ fontSize: 11, color: "#64748b" }}>
+              {p?.name}
+              {isTr && toP && <> → {toP?.name}</>}
+              {isTr && tx.fees > 0 && <span style={{ color: red, marginLeft: 6 }}>· frais {fmt2(tx.fees)}</span>}
+            </div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ fontWeight: 600, fontSize: 13, color: isInc ? green : isTr ? purple : red }}>
             {isInc ? "+" : isTr ? "" : "-"}{fmt2(tx.amount)}
           </div>
-          {!isRec && (tx.type === "expense" || tx.type === "income") && (
-            <button onClick={(e) => { e.stopPropagation(); duplicateTx(tx); }}
-              title="Dupliquer cette transaction"
-              style={{ background: "none", border: "none", color: vio + "60", cursor: "pointer", fontSize: 12, padding: 2 }}>
-              📋
-            </button>
-          )}
-          {!isRec && (confirmDel === tx.id ? (
-            <div style={{ display: "flex", gap: 3 }}>
-              <button onClick={() => del(tx.id)} style={{ background: red, border: "none", borderRadius: 5, color: "#fff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Oui</button>
-              <button onClick={() => setConfirmDel(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 5, color: t2, fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Non</button>
+          {/* Boutons cachés par défaut, apparaissent au survol */}
+          {!isRec && (
+            <div style={{ display: "flex", alignItems: "center", gap: 3, opacity: isHovered || isConfirmingDel ? 1 : 0, transition: "opacity 0.15s", pointerEvents: isHovered || isConfirmingDel ? "auto" : "none" }}>
+              {(tx.type === "expense" || tx.type === "income") && (
+                <button onClick={(e) => { e.stopPropagation(); duplicateTx(tx); }}
+                  title="Dupliquer cette transaction"
+                  style={{ background: "none", border: "none", color: vio + "80", cursor: "pointer", fontSize: 12, padding: 2 }}>
+                  📋
+                </button>
+              )}
+              {isConfirmingDel ? (
+                <div style={{ display: "flex", gap: 3 }}>
+                  <button onClick={() => del(tx.id)} style={{ background: red, border: "none", borderRadius: 5, color: "#fff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Oui</button>
+                  <button onClick={() => setConfirmDel(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 5, color: t2, fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: ff }}>Non</button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmDel(tx.id)} title="Supprimer" style={{ background: "none", border: "none", color: t2 + "60", cursor: "pointer", fontSize: 13, padding: 2 }}>×</button>
+              )}
             </div>
-          ) : <button onClick={() => setConfirmDel(tx.id)} style={{ background: "none", border: "none", color: t2 + "30", cursor: "pointer", fontSize: 13, padding: 2 }}>🗑</button>)}
+          )}
         </div>
-      </G>
+      </div>
     );
   };
 
@@ -1800,41 +1834,135 @@ export default function App() {
             </div>
 
             <div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <button onClick={() => setShowSearch(!showSearch)} style={{ ...pill(showSearch), padding: "6px 12px" }}>🔍</button>
-                <button onClick={() => {
-                  // cycle: date -> amount_desc -> amount_asc -> date
-                  if (sortBy === "date") setSortBy("amount_desc");
-                  else if (sortBy === "amount_desc") setSortBy("amount_asc");
-                  else setSortBy("date");
-                }} style={{ ...pill(sortBy !== "date"), padding: "6px 12px", fontSize: 11 }}>
-                  {sortBy === "date" ? "📅 Date" : sortBy === "amount_desc" ? "💰 ↓ Plus grand" : "💰 ↑ Plus petit"}
-                </button>
-                <button onClick={() => setTxTypeFilter(txTypeFilter === "all" ? "income" : txTypeFilter === "income" ? "expense" : "all")}
-                  style={{ ...pill(txTypeFilter !== "all", txTypeFilter === "income" ? green : txTypeFilter === "expense" ? red : null), padding: "6px 12px", fontSize: 11 }}>
-                  {txTypeFilter === "all" ? "Tout" : txTypeFilter === "income" ? "📥 Rentrées" : "📤 Sorties"}
-                </button>
-                <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "6px 12px", fontSize: 11 }}>💕 Elea</button>
-                <button onClick={() => setInconnuFilter(!inconnuFilter)} style={{ ...pill(inconnuFilter, "#facc15"), padding: "6px 12px", fontSize: 11 }}>❓ Inconnu</button>
-                {categoryFilter && (() => {
-                  const cat = EXP_CATS.find(c => c.id === categoryFilter);
-                  if (!cat) return null;
-                  return (
-                    <button onClick={() => setCategoryFilter(null)} title="Désactiver le filtre catégorie" style={{ ...pill(true, cat.color), padding: "6px 12px", fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}>
-                      {cat.emoji} {cat.name} ×
-                    </button>
-                  );
-                })()}
-                <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
-                  <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "6px 10px", fontSize: 11 }}>Tout</button>
-                  {PLATFORMS.map(p => <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "6px 10px", fontSize: 11 }} title={p.name}>{p.icon}</button>)}
+              {/* HEADER COMPACT : titre + bouton filtres */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>Transactions</div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>{mTx.length} ce mois</div>
                 </div>
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  style={{
+                    background: showFilters ? vio + "15" : "rgba(255,255,255,0.03)",
+                    color: showFilters ? vio : t2,
+                    border: `1px solid ${showFilters ? vio + "40" : "rgba(255,255,255,0.06)"}`,
+                    borderRadius: 8,
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                    fontFamily: ff,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                >
+                  ⚙️ Filtres {showFilters ? "▲" : "▼"}
+                </button>
               </div>
-              {showSearch && <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." autoFocus style={{ ...inputStyle, marginBottom: 10, fontSize: 13 }} />}
 
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Transactions ({mTx.length})</div>
+              {/* CHIPS DE FILTRES ACTIFS */}
+              {(pFilter !== "all" || eleaFilter || inconnuFilter || categoryFilter || txTypeFilter !== "all" || sortBy !== "date" || search) && (
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10, padding: "6px 0" }}>
+                  {search && <span style={{ background: "rgba(255,255,255,0.04)", color: t2, fontSize: 10, padding: "3px 8px", borderRadius: 12, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }} onClick={() => setSearch("")}>🔍 "{search}" ×</span>}
+                  {sortBy !== "date" && <span style={{ background: "rgba(255,255,255,0.04)", color: t2, fontSize: 10, padding: "3px 8px", borderRadius: 12, cursor: "pointer" }} onClick={() => setSortBy("date")}>{sortBy === "amount_desc" ? "💰 ↓" : "💰 ↑"} ×</span>}
+                  {txTypeFilter !== "all" && <span style={{ background: (txTypeFilter === "income" ? green : red) + "20", color: txTypeFilter === "income" ? green : red, fontSize: 10, padding: "3px 8px", borderRadius: 12, cursor: "pointer" }} onClick={() => setTxTypeFilter("all")}>{txTypeFilter === "income" ? "📥 Rentrées" : "📤 Sorties"} ×</span>}
+                  {pFilter !== "all" && (() => { const p = PLATFORMS.find(x => x.id === pFilter); return p ? <span style={{ background: p.color + "20", color: p.color, fontSize: 10, padding: "3px 8px", borderRadius: 12, cursor: "pointer" }} onClick={() => setPFilter("all")}>{p.icon} {p.name} ×</span> : null; })()}
+                  {categoryFilter && (() => { const c = EXP_CATS.find(x => x.id === categoryFilter); return c ? <span style={{ background: c.color + "20", color: c.color, fontSize: 10, padding: "3px 8px", borderRadius: 12, cursor: "pointer" }} onClick={() => setCategoryFilter(null)}>{c.emoji} {c.name} ×</span> : null; })()}
+                  {eleaFilter && <span style={{ background: "#f472b620", color: "#f472b6", fontSize: 10, padding: "3px 8px", borderRadius: 12, cursor: "pointer" }} onClick={() => setEleaFilter(false)}>💕 Elea ×</span>}
+                  {inconnuFilter && <span style={{ background: "#facc1520", color: "#facc15", fontSize: 10, padding: "3px 8px", borderRadius: 12, cursor: "pointer" }} onClick={() => setInconnuFilter(false)}>❓ Inconnu ×</span>}
+                </div>
+              )}
+
+              {/* PANNEAU FILTRES (accordéon) */}
+              {showFilters && (
+                <G style={{ padding: 16, marginBottom: 10 }}>
+                  {/* Recherche */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>🔍 Recherche</div>
+                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Note, mot-clé..." style={{ ...inputStyle, fontSize: 12 }} />
+                  </div>
+                  {/* Tri */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>📅 Tri</div>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      <button onClick={() => setSortBy("date")} style={{ ...pill(sortBy === "date"), padding: "5px 10px", fontSize: 11 }}>📅 Date ↓</button>
+                      <button onClick={() => setSortBy("amount_desc")} style={{ ...pill(sortBy === "amount_desc"), padding: "5px 10px", fontSize: 11 }}>💰 Plus grand</button>
+                      <button onClick={() => setSortBy("amount_asc")} style={{ ...pill(sortBy === "amount_asc"), padding: "5px 10px", fontSize: 11 }}>💰 Plus petit</button>
+                    </div>
+                  </div>
+                  {/* Type */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>📊 Type</div>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      <button onClick={() => setTxTypeFilter("all")} style={{ ...pill(txTypeFilter === "all"), padding: "5px 10px", fontSize: 11 }}>Tout</button>
+                      <button onClick={() => setTxTypeFilter("income")} style={{ ...pill(txTypeFilter === "income", green), padding: "5px 10px", fontSize: 11 }}>📥 Rentrées</button>
+                      <button onClick={() => setTxTypeFilter("expense")} style={{ ...pill(txTypeFilter === "expense", red), padding: "5px 10px", fontSize: 11 }}>📤 Sorties</button>
+                    </div>
+                  </div>
+                  {/* Plateforme */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>🏦 Plateforme</div>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      <button onClick={() => setPFilter("all")} style={{ ...pill(pFilter === "all"), padding: "5px 10px", fontSize: 11 }}>Tout</button>
+                      {PLATFORMS.map(p => (
+                        <button key={p.id} onClick={() => setPFilter(p.id)} style={{ ...pill(pFilter === p.id, p.color), padding: "5px 10px", fontSize: 11 }}>{p.icon} {p.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Catégories de dépense */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>💰 Catégorie de dépense</div>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      <button onClick={() => setCategoryFilter(null)} style={{ ...pill(!categoryFilter), padding: "5px 10px", fontSize: 11 }}>Tout</button>
+                      {EXP_CATS.map(c => (
+                        <button key={c.id} onClick={() => setCategoryFilter(c.id)} style={{ ...pill(categoryFilter === c.id, c.color), padding: "5px 10px", fontSize: 11 }}>{c.emoji} {c.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Spéciaux */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 5 }}>✨ Spéciaux</div>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      <button onClick={() => setEleaFilter(!eleaFilter)} style={{ ...pill(eleaFilter, "#f472b6"), padding: "5px 10px", fontSize: 11 }}>💕 Elea</button>
+                      <button onClick={() => setInconnuFilter(!inconnuFilter)} style={{ ...pill(inconnuFilter, "#facc15"), padding: "5px 10px", fontSize: 11 }}>❓ Inconnu</button>
+                    </div>
+                  </div>
+                  {/* Reset */}
+                  <button
+                    onClick={() => { setSearch(""); setSortBy("date"); setTxTypeFilter("all"); setPFilter("all"); setCategoryFilter(null); setEleaFilter(false); setInconnuFilter(false); }}
+                    style={{ width: "100%", padding: "8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.03)", color: t2, cursor: "pointer", fontFamily: ff, fontSize: 11 }}
+                  >
+                    ↺ Réinitialiser tous les filtres
+                  </button>
+                </G>
+              )}
+
               {mTx.length === 0 && <G style={{ padding: 30, textAlign: "center" }}><span style={{ color: t2 }}>Aucune transaction</span></G>}
-              {visTx.map(tx => <TxRow key={tx.id} tx={tx} />)}
+              {/* Liste groupée par jour */}
+              {(() => {
+                const grouped = {};
+                visTx.forEach(tx => {
+                  const k = tx.date;
+                  if (!grouped[k]) grouped[k] = [];
+                  grouped[k].push(tx);
+                });
+                const days = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+                return days.map(d => {
+                  const dt = new Date(d);
+                  const dayName = dt.toLocaleDateString("fr-FR", { weekday: "long" });
+                  const dayNum = dt.getDate();
+                  const monthName = dt.toLocaleDateString("fr-FR", { month: "long" });
+                  return (
+                    <div key={d} style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 9, color: "#64748b", textTransform: "uppercase", letterSpacing: 1.4, fontWeight: 600, marginBottom: 6, marginTop: 10 }}>
+                        {dayNum} {monthName} · {dayName}
+                      </div>
+                      {grouped[d].map(tx => <TxRow key={tx.id} tx={tx} />)}
+                    </div>
+                  );
+                });
+              })()}
               {mTx.length > 10 && <button onClick={() => setShowAllTx(!showAllTx)} style={{ ...pill(false), width: "100%", marginTop: 6, textAlign: "center", display: "block" }}>{showAllTx ? "Voir moins" : `Tout voir (${mTx.length})`}</button>}
             </div>
           </div>
