@@ -1748,31 +1748,34 @@ export default function App() {
         )}
 
         {isDesktop ? (
-          // ─── DESKTOP HOME : 2 colonnes ───
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 18 }}>
-            <div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-                <G glow={green} style={{ padding: "18px" }}>
-                  <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>Rentrées</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: green }}>+{fmt(stats.inc)}</div>
-                </G>
-                <G glow={red} style={{ padding: "18px" }}>
-                  <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>Dépenses</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: red }}>-{fmt(stats.exp)}</div>
+          // ─── DESKTOP HOME : grille stats+donut puis 4 cards puis transactions full-width ───
+          <div>
+            {/* TOP : 2 colonnes — Stats à gauche, Donut à droite */}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)", gap: 18, marginBottom: 14 }}>
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <G glow={green} style={{ padding: "18px" }}>
+                    <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>Rentrées</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: green }}>+{fmt(stats.inc)}</div>
+                  </G>
+                  <G glow={red} style={{ padding: "18px" }}>
+                    <div style={{ fontSize: 11, color: t2, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 6 }}>Dépenses</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: red }}>-{fmt(stats.exp)}</div>
+                  </G>
+                </div>
+                <G glow={stats.net >= 0 ? green : red} style={{ padding: "32px 18px", textAlign: "center", display: "flex", flexDirection: "column", justifyContent: "center", minHeight: 180 }}>
+                  <div style={{ fontSize: 11, color: t2, letterSpacing: 1.2, marginBottom: 8 }}>NET</div>
+                  <div style={{ fontSize: 40, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : "-"}{fmt(stats.net)}</div>
                 </G>
               </div>
-              <G glow={stats.net >= 0 ? green : red} style={{ padding: "16px 18px", marginBottom: 12, textAlign: "center" }}>
-                <span style={{ fontSize: 11, color: t2, letterSpacing: 1.2 }}>NET </span>
-                <span style={{ fontSize: 30, fontWeight: 700, color: stats.net >= 0 ? green : red }}>{stats.net >= 0 ? "+" : "-"}{fmt(stats.net)}</span>
-              </G>
 
-              {/* Mini donut dépenses */}
-              {donutExp.length > 0 && (
-                <G style={{ padding: 16 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12, color: red }}>Dépenses du mois</div>
-                  <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                    <Donut data={donutExp} size={120} />
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+              {/* DROITE : Donut */}
+              {donutExp.length > 0 ? (
+                <G style={{ padding: 18 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 14, color: red }}>📊 Dépenses du mois — {fmt(stats.exp)}</div>
+                  <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
+                    <Donut data={donutExp} size={140} />
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
                       {donutExp.slice(0, 7).map(d => {
                         const isActive = categoryFilter === d.id;
                         return (
@@ -1794,52 +1797,57 @@ export default function App() {
                           >
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color }} />
-                              <span style={{ fontSize: 11, color: isActive ? d.color : t2, fontWeight: isActive ? 600 : 400 }}>{d.label}</span>
+                              <span style={{ fontSize: 12, color: isActive ? d.color : t2, fontWeight: isActive ? 600 : 400 }}>{d.label}</span>
                             </div>
-                            <span style={{ fontSize: 11, fontWeight: 600, color: t1 }}>{fmt(d.value)}</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: t1 }}>{fmt(d.value)}</span>
                           </div>
                         );
                       })}
                     </div>
                   </div>
                 </G>
+              ) : (
+                <G style={{ padding: 18, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: 12, color: t2 }}>Aucune dépense ce mois</span>
+                </G>
               )}
-
-              {/* 4 CARDS : Abos · Elea · Remb · À vérifier (sous le donut) */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 12 }}>
-                <G style={{ padding: "12px 14px", textAlign: "center" }}>
-                  <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>📱 Abos</div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: totalSubsMonth > 0 ? vio : t2 + "60" }}>
-                    {totalSubsMonth > 0 ? `${fmt(totalSubsMonth)}/mois` : "—"}
-                  </div>
-                </G>
-                <G style={{ padding: "12px 14px", textAlign: "center" }}>
-                  <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>💕 Elea</div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: eleaTotal > 0 ? "#f472b6" : t2 + "60" }}>
-                    {eleaTotal > 0 ? fmt(eleaTotal) : "—"}
-                  </div>
-                </G>
-                <G
-                  style={{ padding: "12px 14px", textAlign: "center", cursor: totalPendingRefunds > 0 ? "pointer" : "default" }}
-                  onClick={() => totalPendingRefunds > 0 && setTab("refunds")}
-                >
-                  <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>💸 Remb.</div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: totalPendingRefunds > 0 ? "#fbbf24" : t2 + "60" }}>
-                    {totalPendingRefunds > 0 ? fmt(totalPendingRefunds) : "—"}
-                  </div>
-                </G>
-                <G
-                  style={{ padding: "12px 14px", textAlign: "center", cursor: inconnuStats.count > 0 ? "pointer" : "default" }}
-                  onClick={() => inconnuStats.count > 0 && setInconnuFilter(true)}
-                >
-                  <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>❓ À vérifier</div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: inconnuStats.count > 0 ? "#fbbf24" : t2 + "60" }}>
-                    {inconnuStats.count > 0 ? `${inconnuStats.count} tx · ${fmt(inconnuStats.total)}` : "—"}
-                  </div>
-                </G>
-              </div>
             </div>
 
+            {/* MILIEU : 4 CARDS pleine largeur */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 14 }}>
+              <G style={{ padding: "14px 16px", textAlign: "center" }}>
+                <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>📱 Abos</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: totalSubsMonth > 0 ? vio : t2 + "60" }}>
+                  {totalSubsMonth > 0 ? `${fmt(totalSubsMonth)}/mois` : "—"}
+                </div>
+              </G>
+              <G style={{ padding: "14px 16px", textAlign: "center" }}>
+                <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>💕 Elea</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: eleaTotal > 0 ? "#f472b6" : t2 + "60" }}>
+                  {eleaTotal > 0 ? fmt(eleaTotal) : "—"}
+                </div>
+              </G>
+              <G
+                style={{ padding: "14px 16px", textAlign: "center", cursor: totalPendingRefunds > 0 ? "pointer" : "default" }}
+                onClick={() => totalPendingRefunds > 0 && setTab("refunds")}
+              >
+                <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>💸 Remb.</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: totalPendingRefunds > 0 ? "#fbbf24" : t2 + "60" }}>
+                  {totalPendingRefunds > 0 ? fmt(totalPendingRefunds) : "—"}
+                </div>
+              </G>
+              <G
+                style={{ padding: "14px 16px", textAlign: "center", cursor: inconnuStats.count > 0 ? "pointer" : "default" }}
+                onClick={() => inconnuStats.count > 0 && setInconnuFilter(true)}
+              >
+                <div style={{ fontSize: 10, color: t2, marginBottom: 4 }}>❓ À vérifier</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: inconnuStats.count > 0 ? "#fbbf24" : t2 + "60" }}>
+                  {inconnuStats.count > 0 ? `${inconnuStats.count} tx · ${fmt(inconnuStats.total)}` : "—"}
+                </div>
+              </G>
+            </div>
+
+            {/* BAS : TRANSACTIONS pleine largeur */}
             <div>
               {/* HEADER COMPACT : titre + bouton filtres */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
